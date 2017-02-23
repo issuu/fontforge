@@ -734,7 +734,9 @@ static void ttfdumpmetrics(SplineChar *sc,struct glyphinfo *gi,DBounds *b) {
 
     if ( sc->ttf_glyph<=gi->lasthwidth )
 	putshort(gi->hmtx,width);
-    putshort(gi->hmtx,b->minx);
+    //putshort(gi->hmtx,b->minx);
+    // Use the value of lsidebearing instead of the one calculated from the glyph itself.
+    putshort(gi->hmtx,sc->lsidebearing);
     if ( sc->parent->hasvmetrics ) {
 	if ( sc->ttf_glyph<=gi->lastvwidth )
 	    putshort(gi->vmtx,vwidth);

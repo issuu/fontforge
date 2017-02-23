@@ -42,3 +42,4 @@ pycontrib/simple/Makefile.in
 pyhook/Makefile.in
 share/Makefile.in
 tests/Makefile.in
+.bootstrap.made

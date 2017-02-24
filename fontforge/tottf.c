@@ -2062,12 +2062,10 @@ static void dumpcffprivate(SplineFont *sf,struct alltabs *at,int subfont,
 
     if ( hasblue )
 	DumpStrArray(PSDictHasEntry(sf->private,"BlueValues"),private,6);
-    else
-	DumpDblArray(bluevalues,sizeof(bluevalues)/sizeof(bluevalues[0]),private,6);
+
     if ( (pt=PSDictHasEntry(sf->private,"OtherBlues"))!=NULL )
 	DumpStrArray(pt,private,7);
-    else if ( !hasblue )
-	DumpDblArray(otherblues,sizeof(otherblues)/sizeof(otherblues[0]),private,7);
+
     if ( (pt=PSDictHasEntry(sf->private,"FamilyBlues"))!=NULL )
 	DumpStrArray(pt,private,8);
     bluescale = BlueScaleFigure(sf->private,bluevalues,otherblues);

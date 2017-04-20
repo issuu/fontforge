@@ -1,6 +1,6 @@
 [submodule "gnulib"]
 	path = gnulib
-	url = http://git.savannah.gnu.org/r/gnulib.git
+	url = https://github.com/coreutils/gnulib.git
 [submodule "uthash"]
 	path = uthash
 	url = https://github.com/troydhanson/uthash

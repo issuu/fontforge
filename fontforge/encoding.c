@@ -2043,6 +2043,10 @@ return 0;
 }
 
 void SFRemoveGlyph( SplineFont *sf,SplineChar *sc ) {
+    return SFRemoveGlyphKern( sf, sc, true );
+}
+
+void SFRemoveGlyphKern( SplineFont *sf,SplineChar *sc, bool update_kern ) {
     struct splinecharlist *dep, *dnext;
     struct bdfcharlist *bdep, *bdnext;
     RefChar *rf, *refs, *rnext;
@@ -2082,6 +2086,7 @@ return;
     }
 
     /* Remove any kerning pairs that look at this character */
+    if (update_kern) {
     for ( i=0; i<sf->glyphcnt; ++i ) if ( sf->glyphs[i]!=NULL ) {
 	for ( kprev=NULL, kp=sf->glyphs[i]->kerns; kp!=NULL; kprev = kp, kp=kp->next ) {
 	    if ( kp->sc==sc ) {
@@ -2094,6 +2099,7 @@ return;
 	break;
 	    }
 	}
+    }
     }
 
     sf->glyphs[sc->orig_pos] = NULL;

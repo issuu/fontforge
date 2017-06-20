@@ -3321,6 +3321,7 @@ extern void ScriptExport(SplineFont *sf, BDFFont *bdf, int format, int gid,
 
 extern EncMap *EncMapFromEncoding(SplineFont *sf,Encoding *enc);
 extern void SFRemoveGlyph(SplineFont *sf,SplineChar *sc);
+extern void SFRemoveGlyphKern(SplineFont *sf,SplineChar *sc, bool update_kern);
 extern void SFAddEncodingSlot(SplineFont *sf,int gid);
 extern void SFAddGlyphAndEncode(SplineFont *sf,SplineChar *sc,EncMap *basemap, int baseenc);
 extern void SCDoRedo(SplineChar *sc,int layer);

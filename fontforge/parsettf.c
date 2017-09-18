@@ -3093,8 +3093,20 @@ static struct topdicts *readcfftopdict(FILE *ttf, char *fontname, int len,
 	    td->charstringtype = stack[sp-1];
 	  break;
 	  case (12<<8)+7:
-	    memcpy(td->fontmatrix,stack,(sp>=6?6:sp)*sizeof(real));
-	    td->fontmatrix_set = 1;
+            // isuu change: FontForge does not handle non-default CFF FontMatrix
+            // properly. We store this information in the layers information,
+            // and apply this transformation ourselves. To avoid scaling twice
+            // (both here and in our code), we never load in this information in FF,
+            // and only rely on our code.
+            //
+            // We saw problems where scaling in one dimension was applied to the
+            // other dimension as well in FF, so only relying on FF is not a solution.
+            //
+            // @rl and @fs 18 Sep 2017
+
+            //memcpy(td->fontmatrix,stack,(sp>=6?6:sp)*sizeof(real));
+            //td->fontmatrix_set = 1;
+            printf("issuu change: ignoring custom CFF FontMatrix\n");
 	  break;
 	  case 13:
 	    td->uniqueid = stack[sp-1];

@@ -3093,20 +3093,8 @@ static struct topdicts *readcfftopdict(FILE *ttf, char *fontname, int len,
 	    td->charstringtype = stack[sp-1];
 	  break;
 	  case (12<<8)+7:
-            // isuu change: FontForge does not handle non-default CFF FontMatrix
-            // properly. We store this information in the layers information,
-            // and apply this transformation ourselves. To avoid scaling twice
-            // (both here and in our code), we never load in this information in FF,
-            // and only rely on our code.
-            //
-            // We saw problems where scaling in one dimension was applied to the
-            // other dimension as well in FF, so only relying on FF is not a solution.
-            //
-            // @rl and @fs 18 Sep 2017
-
-            //memcpy(td->fontmatrix,stack,(sp>=6?6:sp)*sizeof(real));
-            //td->fontmatrix_set = 1;
-            printf("issuu change: ignoring custom CFF FontMatrix\n");
+            memcpy(td->fontmatrix,stack,(sp>=6?6:sp)*sizeof(real));
+            td->fontmatrix_set = 1;
 	  break;
 	  case 13:
 	    td->uniqueid = stack[sp-1];
@@ -3716,8 +3704,9 @@ static SplineFont *cffsffillup(struct topdicts *subdict, char **strings,
 
     if ( subdict->fontmatrix[0]==0 )
 	emsize = 1000;
-    else
-	emsize = rint( 1/subdict->fontmatrix[0] );
+    else {
+        emsize = fmin( rint( 1/subdict->fontmatrix[0] ), rint( 1/subdict->fontmatrix[3] ) );
+    }
     sf->ascent = .8*emsize;
     sf->descent = emsize - sf->ascent;
     if ( subdict->copyright!=-1 )
@@ -3751,8 +3740,10 @@ static void cffinfofillup(struct ttfinfo *info, struct topdicts *dict,
 
     if ( dict->fontmatrix[0]==0 )
 	info->emsize = 1000;
-    else
-	info->emsize = rint( 1/dict->fontmatrix[0] );
+    else {
+        info->emsize = fmin( rint( 1/dict->fontmatrix[0] ), rint( 1/dict->fontmatrix[3] ) );
+    }
+
     info->ascent = .8*info->emsize;
     info->descent = info->emsize - info->ascent;
     if ( dict->copyright!=-1 || dict->notice!=-1 )

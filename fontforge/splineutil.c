@@ -2355,8 +2355,9 @@ static void SplineFontMetaData(SplineFont *sf,struct fontdict *fd) {
     /*sf->wasbinary = fd->wasbinary;*/
     if ( fd->fontmatrix[0]==0 )
 	em = 1000;
-    else
-	em = rint(1/fd->fontmatrix[0]);
+    else {
+        em = fmin( rint( 1/fd->fontmatrix[0] ), rint( 1/fd->fontmatrix[3] ) );
+    }
     if ( sf->ascent==0 && sf->descent!=0 )
 	sf->ascent = em-sf->descent;
     else if ( fd->fontbb[3]-fd->fontbb[1]==em ) {

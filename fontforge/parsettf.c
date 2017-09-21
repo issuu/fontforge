@@ -3709,6 +3709,9 @@ static SplineFont *cffsffillup(struct topdicts *subdict, char **strings,
     }
     sf->ascent = .8*emsize;
     sf->descent = emsize - sf->ascent;
+
+    memcpy(sf->issuu_matrix, subdict->fontmatrix, sizeof(sf->issuu_matrix));
+
     if ( subdict->copyright!=-1 )
 	sf->copyright = utf8_verify_copy(getsid(subdict->copyright,strings,scnt,info));
     else
@@ -3743,6 +3746,8 @@ static void cffinfofillup(struct ttfinfo *info, struct topdicts *dict,
     else {
         info->emsize = fmin( rint( 1/dict->fontmatrix[0] ), rint( 1/dict->fontmatrix[3] ) );
     }
+
+    memcpy(info->issuu_matrix, dict->fontmatrix, sizeof(info->issuu_matrix));
 
     info->ascent = .8*info->emsize;
     info->descent = info->emsize - info->ascent;
@@ -6013,6 +6018,9 @@ static SplineFont *SFFillFromTTF(struct ttfinfo *info) {
     struct ttf_table *last[2], *tab, *next;
 
     sf = SplineFontEmpty();
+
+    memcpy(sf->issuu_matrix, info->issuu_matrix, sizeof(sf->issuu_matrix));
+
     sf->display_size = -default_fv_font_size;
     sf->display_antialias = default_fv_antialias;
     sf->fontname = info->fontname;

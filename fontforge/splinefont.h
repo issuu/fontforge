@@ -1938,6 +1938,7 @@ typedef struct splinefont {
     struct sfundoes *undoes;
     char collab_uuid[ FF_UUID_STRING_SIZE ];
     int preferred_kerning; // 1 for U. F. O. native, 2 for feature file, 0 undefined. Input functions shall flag 2, I think. This is now in S. F. D. in order to round-trip U. F. O. consistently.
+    real issuu_matrix[6];
 } SplineFont;
 
 struct axismap {

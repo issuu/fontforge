@@ -326,6 +326,8 @@ struct ttfinfo {
     struct otffeatname *feat_names;
     enum gsub_inusetype justinuse;
     long ttfFileSize;
+
+    real issuu_matrix[6];
 };
 
 struct taboff {

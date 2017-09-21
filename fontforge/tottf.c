@@ -2156,14 +2156,14 @@ static void dumpcfftopdict(SplineFont *sf,struct alltabs *at) {
 	dumpdbloper(cfff,sf->strokewidth,(12<<8)|8);
     }
     /* We'll never set CharstringType */
-    if ( sf->ascent+sf->descent!=1000 ) {
-	dumpdbl(cfff,1.0/(sf->ascent+sf->descent));
-	dumpint(cfff,0);
-	dumpint(cfff,0);
-	dumpdbl(cfff,1.0/(sf->ascent+sf->descent));
-	dumpint(cfff,0);
-	dumpintoper(cfff,0,(12<<8)|7);
-    }
+    dumpdbl(cfff, sf->issuu_matrix[0]);
+    dumpdbl(cfff, sf->issuu_matrix[1]);
+    dumpdbl(cfff, sf->issuu_matrix[2]);
+    dumpdbl(cfff, sf->issuu_matrix[3]);
+    dumpdbl(cfff, sf->issuu_matrix[4]);
+    dumpdbl(cfff, sf->issuu_matrix[5]);
+    dumpoper(cfff, (12<<8)|7);
+
     if ( sf->uniqueid!=-1 && sf->use_uniqueid )
 	dumpintoper(cfff, sf->uniqueid?sf->uniqueid:4000000 + (rand()&0x3ffff), 13 );
     SplineFontLayerFindBounds(sf,at->gi.layer,&b);

@@ -682,7 +682,7 @@ return;
 	}
 	if( pointtype==pt_curve )
 	    makedflt = true;
-	
+
 	if ( makedflt ) {
 	    sp->nextcpdef = sp->prevcpdef = true;
 	    if (( sp->prev!=NULL && sp->prev->order2 ) ||
@@ -2534,16 +2534,18 @@ void SCClearInstrsOrMark(SplineChar *sc, int layer, int complain) {
     else if ( sc->complained_about_ptnums )
 	/* It's annoying to get the same message over and over again as you edit a glyph */;
     else if ( had_ap || had_dep || had_instrs ) {
+	#ifndef ISSUU_FF_QUIET
 	ff_post_notice(_("You changed the point numbering"),
 		_("You have just changed the point numbering of glyph %s.%s%s%s"),
 			sc->name,
 			had_instrs==0 ? "" :
 			had_instrs==1 ? _(" Instructions in this glyph (or one that refers to it) have been lost.") :
-			                _(" Instructions in this glyph (or one that refers to it) are now out of date."),
+							_(" Instructions in this glyph (or one that refers to it) are now out of date."),
 			had_dep ? _(" At least one reference to this glyph used point matching. That match is now out of date.")
 				: "",
 			had_ap ? _(" At least one anchor point used point matching. It may be out of date now.")
 				: "" );
+	#endif
 	sc->complained_about_ptnums = true;
 	if ( had_instrs==2 )
 	    FVRefreshAll( sc->parent );

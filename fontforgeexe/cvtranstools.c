@@ -24,7 +24,13 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
+#include "nonlineartrans.h"
+
 #include <math.h>
 
 void CVMouseDownTransform(CharView *cv) {
@@ -32,6 +38,7 @@ void CVMouseDownTransform(CharView *cv) {
 }
 
 void CVMouseMoveTransform(CharView *cv) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     real transform[6];
 
     CVRestoreTOriginalState(cv);
@@ -61,8 +68,8 @@ void CVMouseMoveTransform(CharView *cv) {
 	    }
 	  } break;
 	  case cvt_scale: {
-	      transform[0] = 1.0+(cv->info.x-cv->p.cx)/(400*cv->scale);
-	      transform[3] = 1.0+(cv->info.y-cv->p.cy)/(400*cv->scale);
+	      transform[0] = 1.0+(cv->info.x-cv->p.cx)/(400*tab->scale);
+	      transform[3] = 1.0+(cv->info.y-cv->p.cy)/(400*tab->scale);
 	  } break;
 	  case cvt_skew: {
 	    real angle = atan2(cv->info.y-cv->p.cy,cv->info.x-cv->p.cx);
@@ -72,8 +79,8 @@ void CVMouseMoveTransform(CharView *cv) {
 	    real angle = atan2(cv->info.y-cv->p.cy,cv->info.x-cv->p.cx);
 /* Allow one pixel per degree */
 	    real zangle = sqrt( (cv->info.x-cv->p.cx)*(cv->info.x-cv->p.cx) +
-		    (cv->info.y-cv->p.cy)*(cv->info.y-cv->p.cy) ) * cv->scale *
-		    3.1415926535897932/180;
+		    (cv->info.y-cv->p.cy)*(cv->info.y-cv->p.cy) ) * tab->scale *
+		    FF_PI/180;
 	    real s = sin(angle), c = cos(angle);
 	    real cz = cos(zangle);
 	    transform[0] = c*c + s*s*cz;

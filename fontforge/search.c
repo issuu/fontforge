@@ -24,11 +24,20 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <math.h>
-#include <ustring.h>
-#include <utype.h>
+
+#include <fontforge-config.h>
+
 #include "search.h"
+
+#include "cvundoes.h"
+#include "fontforgevw.h"
+#include "fvfonts.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
 
 static int CoordMatches(real real_off, real search_off, SearchData *s) {
     if ( real_off >= search_off-s->fudge && real_off <= search_off+s->fudge )

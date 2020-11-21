@@ -24,8 +24,11 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GDRAWP_H
-#define _GDRAWP_H
+
+#ifndef FONTFORGE_GDRAWP_H
+#define FONTFORGE_GDRAWP_H
+
+#include "basics.h"
 
 #include "gdraw.h"
 
@@ -87,6 +90,9 @@ struct gchr_accents {
     uint32 mask;
 };
 
+enum text_funcs { tf_width, tf_drawit, tf_rect, tf_stopat, tf_stopbefore, tf_stopafter };
+struct tf_arg { GTextBounds size; int width, maxwidth; unichar_t *last; char *utf8_last; int first; int dont_replace; };
+
 struct gwindow {
     GGC *ggc;
     GDisplay *display;
@@ -129,29 +135,15 @@ struct gtimer {
     unsigned int active: 1;
 };
 
-typedef struct fd_callback_struct
-{
-    int    fd;
-    void*  udata;
-    void (*callback)(int fd, void* udata );
-    
-} fd_callback_t;
-
-enum { gdisplay_fd_callbacks_size = 64 };
-
 struct gdisplay {
     struct displayfuncs *funcs;
-    void *semaphore;				/* To lock the display against multiple threads */
     struct font_state *fontstate;
     int16 res;
-    int16 scale_screen_by;			/* When converting screen pixels to printer pixels */
     GWindow groot;
     Color def_background, def_foreground;
     uint16 mykey_state;
     uint16 mykey_keysym;
     uint16 mykey_mask;
-    fd_callback_t fd_callbacks[ gdisplay_fd_callbacks_size ];
-    int fd_callbacks_last;
     unsigned int mykeybuild: 1;
     unsigned int default_visual: 1;
     unsigned int do_dithering: 1;
@@ -180,25 +172,21 @@ struct font_data;
 
 struct displayfuncs {
     void (*init)(GDisplay *);
-    void (*term)(GDisplay *);
-    void *(*nativeDisplay)(GDisplay *);
 
     void (*setDefaultIcon)(GWindow);
 
     GWindow (*createTopWindow)(GDisplay *, GRect *pos, int (*eh)(GWindow,GEvent *), void *user_data, GWindowAttrs *);
     GWindow (*createSubWindow)(GWindow, GRect *pos, int (*eh)(GWindow,GEvent *), void *user_data, GWindowAttrs *);
-    GWindow (*createPixmap)(GDisplay *, uint16 width, uint16 height);
+    GWindow (*createPixmap)(GDisplay *, GWindow similar, uint16 width, uint16 height);
     GWindow (*createBitmap)(GDisplay *, uint16 width, uint16 height, uint8 *data);
     GCursor (*createCursor)(GWindow src, GWindow mask, Color fg, Color bg, int16 x, int16 y);
     void (*destroyWindow)(GWindow);
     void (*destroyCursor)(GDisplay *,GCursor);
     int (*nativeWindowExists)(GDisplay *,void *native_window);
     void (*setZoom)(GWindow,GRect *size,enum gzoom_flags flags);
-    void (*setWindowBorder)(GWindow,int width,Color);
     void (*setWindowBackground)(GWindow,Color);
     int (*setDither)(GDisplay *,int);
 
-    void (*reparentWindow)(GWindow,GWindow,int,int);
     void (*setVisible)(GWindow,int);
     void (*move)(GWindow,int32,int32);
     void (*trueMove)(GWindow,int32,int32);
@@ -221,10 +209,11 @@ struct displayfuncs {
     void (*translateCoordinates)(GWindow from, GWindow to, GPoint *pt);
 
     void (*beep)(GDisplay *);
-    void (*flush)(GDisplay *);
 
     void (*pushClip)(GWindow, GRect *rct, GRect *old);
     void (*popClip)(GWindow, GRect *old);
+
+    void (*setDifferenceMode)(GWindow);
 
     void (*clear)(GWindow,GRect *);
     void (*drawLine)(GWindow, int32 x,int32 y, int32 xend,int32 yend, Color col);
@@ -240,15 +229,13 @@ struct displayfuncs {
     void (*scroll)(GWindow, GRect *rect, int32 hor, int32 vert);
 
     void (*drawImage)(GWindow, GImage *, GRect *src, int32 x, int32 y);
-    void (*tileImage)(GWindow, GImage *, GRect *src, int32 x, int32 y);
     void (*drawGlyph)(GWindow, GImage *, GRect *src, int32 x, int32 y);
     void (*drawImageMag)(GWindow, GImage *, GRect *src, int32 x, int32 y, int32 width, int32 height);
-    GImage *(*copyScreenToImage)(GWindow, GRect *rect);
     void (*drawPixmap)(GWindow, GWindow, GRect *src, int32 x, int32 y);
-    void (*tilePixmap)(GWindow, GWindow, GRect *src, int32 x, int32 y);
 
     GIC *(*createInputContext)(GWindow, enum gic_style);
     void (*setGIC)(GWindow, GIC *, int x, int y);
+    int (*keyState)(GWindow w, int keysym);
 
     void (*grabSelection)(GWindow w,enum selnames sel);
     void (*addSelectionType)(GWindow w,enum selnames sel,char *type,
@@ -276,12 +263,6 @@ struct displayfuncs {
     GTimer *(*requestTimer)(GWindow w,int32 time_from_now,int32 frequency, void *userdata);
     void (*cancelTimer)(GTimer *timer);
 
-    void (*syncThread)(GDisplay *gd, void (*func)(void *), void *data);
-
-    GWindow (*startJob)(GDisplay *gdisp,void *user_data,GPrinterAttrs *attrs);
-    void (*nextPage)(GWindow w);
-    int (*endJob)(GWindow w,int cancel);
-
     void (*getFontMetrics)(GWindow,GFont *,int *,int *,int *);
 
     enum gcairo_flags (*hasCairo)(GWindow w);
@@ -306,15 +287,22 @@ struct displayfuncs {
     void (*startNewSubPath)(GWindow w);
     int  (*fillRuleSetWinding)(GWindow w);
 
+    int (*doText8)(GWindow w, int32 x, int32 y, const char *text, int32 cnt, Color col, enum text_funcs drawit, struct tf_arg *arg);
+
     void (*PushClipOnly)(GWindow w);
     void (*ClipPreserve)(GWindow w);
     
 };
 
+extern int16 div_tables[257][2]; // in div_tables.c
+
+extern void GDrawIErrorRun(const char *fmt,...);
+extern void GDrawIError(const char *fmt,...);
+
 extern void _GXDraw_DestroyDisplay(GDisplay * gdisp);
 extern GDisplay *_GXDraw_CreateDisplay(char *displayname,char *programname);
-extern void _GPSDraw_DestroyDisplay(GDisplay *gdisp);
-extern GDisplay *_GPSDraw_CreateDisplay(void);
+extern void _GGDKDraw_DestroyDisplay(GDisplay *disp);
+extern GDisplay *_GGDKDraw_CreateDisplay(char *displayname, char *programname);
 extern void _GDraw_InitError(GDisplay *);
 extern void _GDraw_ComposeChars(GDisplay *gdisp,GEvent *gevent);
 
@@ -324,4 +312,5 @@ extern const GCol *_GImage_GetIndexedPixelPrecise(Color col,RevCMap *rev);
 
 extern void (*_GDraw_BuildCharHook)(GDisplay *);
 extern void (*_GDraw_InsCharHook)(GDisplay *,unichar_t);
-#endif
+
+#endif /* FONTFORGE_GDRAWP_H */

@@ -25,6 +25,10 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
+#include "clipnoui.h"
+
 #include "fontforge.h"
 #include "uiinterface.h"
 

@@ -25,27 +25,36 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <chardata.h>
-#include <utype.h>
-#include <ustring.h>
-#include <math.h>
-#include <locale.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include "ttf.h"
+
+#include <fontforge-config.h>
+
 #include "lookups.h"
-#include "xvasprintf.h"
+
+#include "chardata.h"
+#include "fontforgevw.h"
+#include "fvfonts.h"
+#include "macenc.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "tottfgpos.h"
+#include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stdlib.h>
 
 struct opentype_feature_friendlynames friendlies[] = {
     { CHR('a','a','l','t'),	"aalt", N_("Access All Alternates"),	gsub_single_mask|gsub_alternate_mask },
-    { CHR('a','b','v','f'),	"abvf", N_("Above Base Forms"),		gsub_single_mask },
+    { CHR('a','b','v','f'),	"abvf", N_("Above Base Forms"),		gsub_single_mask|gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask },
     { CHR('a','b','v','m'),	"abvm", N_("Above Base Mark"),		gpos_mark2base_mask|gpos_mark2ligature_mask },
-    { CHR('a','b','v','s'),	"abvs", N_("Above Base Substitutions"),	gsub_ligature_mask },
+    { CHR('a','b','v','s'),	"abvs", N_("Above Base Substitutions"),	gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask },
     { CHR('a','f','r','c'),	"afrc", N_("Vertical Fractions"),	gsub_ligature_mask },
     { CHR('a','k','h','n'),	"akhn", N_("Akhand"),			gsub_ligature_mask },
-    { CHR('a','l','i','g'),	"alig", N_("Ancient Ligatures"),	gsub_ligature_mask },
-    { CHR('b','l','w','f'),	"blwf", N_("Below Base Forms"),		gsub_ligature_mask },
+    { CHR('a','l','i','g'),	"alig", N_("Ancient Ligatures (Obsolete)"),	gsub_ligature_mask },
+    { CHR('b','l','w','f'),	"blwf", N_("Below Base Forms"),		gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask },
     { CHR('b','l','w','m'),	"blwm", N_("Below Base Mark"),		gpos_mark2base_mask|gpos_mark2ligature_mask },
     { CHR('b','l','w','s'),	"blws", N_("Below Base Substitutions"),	gsub_ligature_mask },
     { CHR('c','2','p','c'),	"c2pc", N_("Capitals to Petite Capitals"),	gsub_single_mask },
@@ -55,12 +64,11 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('c','c','m','p'),	"ccmp", N_("Glyph Composition/Decomposition"),	gsub_multiple_mask|gsub_ligature_mask },
     { CHR('c','f','a','r'),	"cfar", N_("Conjunct Form After Ro"),	gsub_single_mask },
     { CHR('c','j','c','t'),	"cjct", N_("Conjunct Forms"),		gsub_ligature_mask },
-    { CHR('c','l','i','g'),	"clig", N_("Contextual Ligatures"),	gsub_reversecchain_mask },
+    { CHR('c','l','i','g'),	"clig", N_("Contextual Ligatures"),	gsub_contextchain_mask|gsub_reversecchain_mask },
     { CHR('c','p','c','t'),	"cpct", N_("Centered CJK Punctuation"),	gpos_single_mask },
     { CHR('c','p','s','p'),	"cpsp", N_("Capital Spacing"),		gpos_single_mask },
-    { CHR('c','s','w','h'),	"cswh", N_("Contextual Swash"),		gsub_reversecchain_mask },
+    { CHR('c','s','w','h'),	"cswh", N_("Contextual Swash"),		gsub_contextchain_mask|gsub_reversecchain_mask },
     { CHR('c','u','r','s'),	"curs", N_("Cursive Attachment"),	gpos_cursive_mask },
-    { CHR('c','v','0','0'),	"cv00", N_("Character Variants 00"),	gsub_single_mask },
     { CHR('c','v','0','1'),	"cv01", N_("Character Variants 01"),	gsub_single_mask },
     { CHR('c','v','0','2'),	"cv02", N_("Character Variants 02"),	gsub_single_mask },
     { CHR('c','v','0','3'),	"cv03", N_("Character Variants 03"),	gsub_single_mask },
@@ -71,17 +79,105 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('c','v','0','8'),	"cv08", N_("Character Variants 08"),	gsub_single_mask },
     { CHR('c','v','0','9'),	"cv09", N_("Character Variants 09"),	gsub_single_mask },
     { CHR('c','v','1','0'),	"cv10", N_("Character Variants 10"),	gsub_single_mask },
+    { CHR('c','v','1','1'),	"cv11", N_("Character Variants 11"),    gsub_single_mask },
+    { CHR('c','v','1','2'),	"cv12", N_("Character Variants 12"),    gsub_single_mask },
+    { CHR('c','v','1','3'),	"cv13", N_("Character Variants 13"),    gsub_single_mask },
+    { CHR('c','v','1','4'),	"cv14", N_("Character Variants 14"),    gsub_single_mask },
+    { CHR('c','v','1','5'),	"cv15", N_("Character Variants 15"),    gsub_single_mask },
+    { CHR('c','v','1','6'),	"cv16", N_("Character Variants 16"),    gsub_single_mask },
+    { CHR('c','v','1','7'),	"cv17", N_("Character Variants 17"),    gsub_single_mask },
+    { CHR('c','v','1','8'),	"cv18", N_("Character Variants 18"),    gsub_single_mask },
+    { CHR('c','v','1','9'),	"cv19", N_("Character Variants 19"),    gsub_single_mask },
+    { CHR('c','v','2','0'),	"cv20", N_("Character Variants 20"),    gsub_single_mask },
+    { CHR('c','v','2','1'),	"cv21", N_("Character Variants 21"),    gsub_single_mask },
+    { CHR('c','v','2','2'),	"cv22", N_("Character Variants 22"),    gsub_single_mask },
+    { CHR('c','v','2','3'),	"cv23", N_("Character Variants 23"),    gsub_single_mask },
+    { CHR('c','v','2','4'),	"cv24", N_("Character Variants 24"),    gsub_single_mask },
+    { CHR('c','v','2','5'),	"cv25", N_("Character Variants 25"),    gsub_single_mask },
+    { CHR('c','v','2','6'),	"cv26", N_("Character Variants 26"),    gsub_single_mask },
+    { CHR('c','v','2','7'),	"cv27", N_("Character Variants 27"),    gsub_single_mask },
+    { CHR('c','v','2','8'),	"cv28", N_("Character Variants 28"),    gsub_single_mask },
+    { CHR('c','v','2','9'),	"cv29", N_("Character Variants 29"),    gsub_single_mask },
+    { CHR('c','v','3','0'),	"cv30", N_("Character Variants 30"),    gsub_single_mask },
+    { CHR('c','v','3','1'),	"cv31", N_("Character Variants 31"),    gsub_single_mask },
+    { CHR('c','v','3','2'),	"cv32", N_("Character Variants 32"),    gsub_single_mask },
+    { CHR('c','v','3','3'),	"cv33", N_("Character Variants 33"),    gsub_single_mask },
+    { CHR('c','v','3','4'),	"cv34", N_("Character Variants 34"),    gsub_single_mask },
+    { CHR('c','v','3','5'),	"cv35", N_("Character Variants 35"),    gsub_single_mask },
+    { CHR('c','v','3','6'),	"cv36", N_("Character Variants 36"),    gsub_single_mask },
+    { CHR('c','v','3','7'),	"cv37", N_("Character Variants 37"),    gsub_single_mask },
+    { CHR('c','v','3','8'),	"cv38", N_("Character Variants 38"),    gsub_single_mask },
+    { CHR('c','v','3','9'),	"cv39", N_("Character Variants 39"),    gsub_single_mask },
+    { CHR('c','v','4','0'),	"cv40", N_("Character Variants 40"),    gsub_single_mask },
+    { CHR('c','v','4','1'),	"cv41", N_("Character Variants 41"),    gsub_single_mask },
+    { CHR('c','v','4','2'),	"cv42", N_("Character Variants 42"),    gsub_single_mask },
+    { CHR('c','v','4','3'),	"cv43", N_("Character Variants 43"),    gsub_single_mask },
+    { CHR('c','v','4','4'),	"cv44", N_("Character Variants 44"),    gsub_single_mask },
+    { CHR('c','v','4','5'),	"cv45", N_("Character Variants 45"),    gsub_single_mask },
+    { CHR('c','v','4','6'),	"cv46", N_("Character Variants 46"),    gsub_single_mask },
+    { CHR('c','v','4','7'),	"cv47", N_("Character Variants 47"),    gsub_single_mask },
+    { CHR('c','v','4','8'),	"cv48", N_("Character Variants 48"),    gsub_single_mask },
+    { CHR('c','v','4','9'),	"cv49", N_("Character Variants 49"),    gsub_single_mask },
+    { CHR('c','v','5','0'),	"cv50", N_("Character Variants 50"),    gsub_single_mask },
+    { CHR('c','v','5','1'),	"cv51", N_("Character Variants 51"),    gsub_single_mask },
+    { CHR('c','v','5','2'),	"cv52", N_("Character Variants 52"),    gsub_single_mask },
+    { CHR('c','v','5','3'),	"cv53", N_("Character Variants 53"),    gsub_single_mask },
+    { CHR('c','v','5','4'),	"cv54", N_("Character Variants 54"),    gsub_single_mask },
+    { CHR('c','v','5','5'),	"cv55", N_("Character Variants 55"),    gsub_single_mask },
+    { CHR('c','v','5','6'),	"cv56", N_("Character Variants 56"),    gsub_single_mask },
+    { CHR('c','v','5','7'),	"cv57", N_("Character Variants 57"),    gsub_single_mask },
+    { CHR('c','v','5','8'),	"cv58", N_("Character Variants 58"),    gsub_single_mask },
+    { CHR('c','v','5','9'),	"cv59", N_("Character Variants 59"),    gsub_single_mask },
+    { CHR('c','v','6','0'),	"cv60", N_("Character Variants 60"),    gsub_single_mask },
+    { CHR('c','v','6','1'),	"cv61", N_("Character Variants 61"),    gsub_single_mask },
+    { CHR('c','v','6','2'),	"cv62", N_("Character Variants 62"),    gsub_single_mask },
+    { CHR('c','v','6','3'),	"cv63", N_("Character Variants 63"),    gsub_single_mask },
+    { CHR('c','v','6','4'),	"cv64", N_("Character Variants 64"),    gsub_single_mask },
+    { CHR('c','v','6','5'),	"cv65", N_("Character Variants 65"),    gsub_single_mask },
+    { CHR('c','v','6','6'),	"cv66", N_("Character Variants 66"),    gsub_single_mask },
+    { CHR('c','v','6','7'),	"cv67", N_("Character Variants 67"),    gsub_single_mask },
+    { CHR('c','v','6','8'),	"cv68", N_("Character Variants 68"),    gsub_single_mask },
+    { CHR('c','v','6','9'),	"cv69", N_("Character Variants 69"),    gsub_single_mask },
+    { CHR('c','v','7','0'),	"cv70", N_("Character Variants 70"),    gsub_single_mask },
+    { CHR('c','v','7','1'),	"cv71", N_("Character Variants 71"),    gsub_single_mask },
+    { CHR('c','v','7','2'),	"cv72", N_("Character Variants 72"),    gsub_single_mask },
+    { CHR('c','v','7','3'),	"cv73", N_("Character Variants 73"),    gsub_single_mask },
+    { CHR('c','v','7','4'),	"cv74", N_("Character Variants 74"),    gsub_single_mask },
+    { CHR('c','v','7','5'),	"cv75", N_("Character Variants 75"),    gsub_single_mask },
+    { CHR('c','v','7','6'),	"cv76", N_("Character Variants 76"),    gsub_single_mask },
+    { CHR('c','v','7','7'),	"cv77", N_("Character Variants 77"),    gsub_single_mask },
+    { CHR('c','v','7','8'),	"cv78", N_("Character Variants 78"),    gsub_single_mask },
+    { CHR('c','v','7','9'),	"cv79", N_("Character Variants 79"),    gsub_single_mask },
+    { CHR('c','v','8','0'),	"cv80", N_("Character Variants 80"),    gsub_single_mask },
+    { CHR('c','v','8','1'),	"cv81", N_("Character Variants 81"),    gsub_single_mask },
+    { CHR('c','v','8','2'),	"cv82", N_("Character Variants 82"),    gsub_single_mask },
+    { CHR('c','v','8','3'),	"cv83", N_("Character Variants 83"),    gsub_single_mask },
+    { CHR('c','v','8','4'),	"cv84", N_("Character Variants 84"),    gsub_single_mask },
+    { CHR('c','v','8','5'),	"cv85", N_("Character Variants 85"),    gsub_single_mask },
+    { CHR('c','v','8','6'),	"cv86", N_("Character Variants 86"),    gsub_single_mask },
+    { CHR('c','v','8','7'),	"cv87", N_("Character Variants 87"),    gsub_single_mask },
+    { CHR('c','v','8','8'),	"cv88", N_("Character Variants 88"),    gsub_single_mask },
+    { CHR('c','v','8','9'),	"cv89", N_("Character Variants 89"),    gsub_single_mask },
+    { CHR('c','v','9','0'),	"cv90", N_("Character Variants 90"),    gsub_single_mask },
+    { CHR('c','v','9','1'),	"cv91", N_("Character Variants 91"),    gsub_single_mask },
+    { CHR('c','v','9','2'),	"cv92", N_("Character Variants 92"),    gsub_single_mask },
+    { CHR('c','v','9','3'),	"cv93", N_("Character Variants 93"),    gsub_single_mask },
+    { CHR('c','v','9','4'),	"cv94", N_("Character Variants 94"),    gsub_single_mask },
+    { CHR('c','v','9','5'),	"cv95", N_("Character Variants 95"),    gsub_single_mask },
+    { CHR('c','v','9','6'),	"cv96", N_("Character Variants 96"),    gsub_single_mask },
+    { CHR('c','v','9','7'),	"cv97", N_("Character Variants 97"),    gsub_single_mask },
+    { CHR('c','v','9','8'),	"cv98", N_("Character Variants 98"),    gsub_single_mask },
     { CHR('c','v','9','9'),	"cv99", N_("Character Variants 99"),	gsub_single_mask },
-    { CHR('d','c','a','p'),	"dcap", N_("Drop Caps"),		gsub_single_mask },
+    { CHR('d','c','a','p'),	"dcap", N_("Drop Caps (Obsolete)"),	gsub_single_mask },
     { CHR('d','i','s','t'),	"dist", N_("Distance"),			gpos_pair_mask },
     { CHR('d','l','i','g'),	"dlig", N_("Discretionary Ligatures"),	gsub_ligature_mask },
     { CHR('d','n','o','m'),	"dnom", N_("Denominators"),		gsub_single_mask },
-    { CHR('d','p','n','g'),	"dpng", N_("Dipthongs (Obsolete)"),	gsub_ligature_mask },
+    { CHR('d','p','n','g'),	"dpng", N_("Diphthongs (Obsolete)"),	gsub_ligature_mask },
     { CHR('d','t','l','s'),	"dtls", N_("Dotless Forms"),		gsub_single_mask },
     { CHR('e','x','p','t'),	"expt", N_("Expert Forms"),		gsub_single_mask },
     { CHR('f','a','l','t'),	"falt", N_("Final Glyph On Line"),	gsub_alternate_mask },
-    { CHR('f','i','n','2'),	"fin2", N_("Terminal Forms #2"),	gsub_context_mask|gsub_contextchain_mask|morx_context_mask },
-    { CHR('f','i','n','3'),	"fin3", N_("Terminal Forms #3"),	gsub_context_mask|gsub_contextchain_mask|morx_context_mask },
+    { CHR('f','i','n','2'),	"fin2", N_("Terminal Forms #2"),	gsub_single_mask },
+    { CHR('f','i','n','3'),	"fin3", N_("Terminal Forms #3"),	gsub_single_mask },
     { CHR('f','i','n','a'),	"fina", N_("Terminal Forms"),		gsub_single_mask },
     { CHR('f','l','a','c'),	"flac", N_("Flattened Accents over Capitals"),	gsub_single_mask|gsub_ligature_mask },
     { CHR('f','r','a','c'),	"frac", N_("Diagonal Fractions"),	gsub_single_mask|gsub_ligature_mask },
@@ -92,7 +188,7 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('h','i','s','t'),	"hist", N_("Historical Forms"),		gsub_single_mask },
     { CHR('h','k','n','a'),	"hkna", N_("Horizontal Kana Alternatives"),	gsub_single_mask },
     { CHR('h','l','i','g'),	"hlig", N_("Historic Ligatures"),	gsub_ligature_mask },
-    { CHR('h','n','g','l'),	"hngl", N_("Hanja to Hangul"),		gsub_single_mask|gsub_alternate_mask },
+    { CHR('h','n','g','l'),	"hngl", N_("Hanja to Hangul (Deprecated)"),	gsub_single_mask|gsub_alternate_mask },
     { CHR('h','o','j','o'),	"hojo", N_("Hojo (JIS X 0212-1990) Kanji Forms"),	gsub_single_mask },
     { CHR('h','w','i','d'),	"hwid", N_("Half Widths"),		gsub_single_mask|gpos_single_mask },
     { CHR('i','n','i','t'),	"init", N_("Initial Forms"),		gsub_single_mask },
@@ -110,8 +206,10 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('l','j','m','o'),	"ljmo", N_("Leading Jamo Forms"),	gsub_ligature_mask },
     { CHR('l','n','u','m'),	"lnum", N_("Lining Figures"),		gsub_single_mask },
     { CHR('l','o','c','l'),	"locl", N_("Localized Forms"),		gsub_single_mask },
+    { CHR('l','t','r','a'),	"ltra", N_("Left to Right Alternates"),	gsub_single_mask },
+    { CHR('l','t','r','m'),	"ltrm", N_("Left to Right mirrored forms"),	gsub_single_mask },
     { CHR('m','a','r','k'),	"mark", N_("Mark Positioning"),		gpos_mark2base_mask|gpos_mark2ligature_mask },
-    { CHR('m','e','d','2'),	"med2", N_("Medial Forms 2"),		gsub_context_mask|gsub_contextchain_mask|morx_context_mask },
+    { CHR('m','e','d','2'),	"med2", N_("Medial Forms 2"),		gsub_single_mask },
     { CHR('m','e','d','i'),	"medi", N_("Medial Forms"),		gsub_single_mask },
     { CHR('m','g','r','k'),	"mgrk", N_("Mathematical Greek"),	gsub_single_mask },
     { CHR('m','k','m','k'),	"mkmk", N_("Mark to Mark"),		gpos_mark2mark_mask },
@@ -128,13 +226,14 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('p','c','a','p'),	"pcap", N_("Lowercase to Petite Capitals"),	gsub_single_mask },
     { CHR('p','k','n','a'),	"pkna", N_("Proportional Kana"),	gpos_single_mask },
     { CHR('p','n','u','m'),	"pnum", N_("Proportional Numbers"),	gsub_single_mask },
-    { CHR('p','r','e','f'),	"pref", N_("Pre Base Forms"),		gsub_ligature_mask },
+    { CHR('p','r','e','f'),	"pref", N_("Pre Base Forms"),		gpos_single_mask|gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask },
     { CHR('p','r','e','s'),	"pres", N_("Pre Base Substitutions"),	gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask|morx_context_mask },
-    { CHR('p','s','t','f'),	"pstf", N_("Post Base Forms"),		gsub_ligature_mask },
-    { CHR('p','s','t','s'),	"psts", N_("Post Base Substitutions"),	gsub_ligature_mask },
+    { CHR('p','s','t','f'),	"pstf", N_("Post Base Forms"),		gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask },
+    { CHR('p','s','t','s'),	"psts", N_("Post Base Substitutions"),	gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask|morx_context_mask },
     { CHR('p','w','i','d'),	"pwid", N_("Proportional Width"),	gsub_single_mask },
     { CHR('q','w','i','d'),	"qwid", N_("Quarter Widths"),		gsub_single_mask|gpos_single_mask },
     { CHR('r','a','n','d'),	"rand", N_("Randomize"),		gsub_alternate_mask },
+    { CHR('r','c','l','t'),	"rclt", N_("Required Contextual Alternates"),	gsub_context_mask|gsub_contextchain_mask|morx_context_mask },
     { CHR('r','k','r','f'),	"rkrf", N_("Rakar Forms"),		gsub_ligature_mask },
     { CHR('r','l','i','g'),	"rlig", N_("Required Ligatures"),	gsub_ligature_mask },
     { CHR('r','p','h','f'),	"rphf", N_("Reph Form"),		gsub_ligature_mask },
@@ -142,6 +241,7 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('r','t','l','a'),	"rtla", N_("Right to Left Alternates"),	gsub_single_mask },
     { CHR('r','t','l','m'),	"rtlm", N_("Right to Left mirrored forms"),	gsub_single_mask },
     { CHR('r','u','b','y'),	"ruby", N_("Ruby Notational Forms"),	gsub_single_mask },
+    { CHR('r','v','r','n'),	"rvrn", N_("Required Variation Alternates"),	gsub_single_mask },
     { CHR('s','a','l','t'),	"salt", N_("Stylistic Alternatives"),	gsub_single_mask|gsub_alternate_mask },
     { CHR('s','i','n','f'),	"sinf", N_("Scientific Inferiors"),	gsub_single_mask },
     { CHR('s','m','c','p'),	"smcp", N_("Lowercase to Small Capitals"),	gsub_single_mask },
@@ -166,7 +266,8 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('s','s','1','8'),	"ss18", N_("Style Set 18"),		gsub_single_mask },
     { CHR('s','s','1','9'),	"ss19", N_("Style Set 19"),		gsub_single_mask },
     { CHR('s','s','2','0'),	"ss20", N_("Style Set 20"),		gsub_single_mask },
-    { CHR('s','s','t','y'),	"ssty", N_("Script Style"),		gsub_single_mask|gsub_alternate_mask },
+    { CHR('s','s','t','y'),	"ssty", N_("Math Script Style"),	gsub_single_mask|gsub_alternate_mask },
+    { CHR('s','t','c','h'),	"stch", N_("Stretching Glyph Decomposition"),	gsub_multiple_mask },
     { CHR('s','u','b','s'),	"subs", N_("Subscript"),		gsub_single_mask },
     { CHR('s','u','p','s'),	"sups", N_("Superscript"),		gsub_single_mask },
     { CHR('s','w','s','h'),	"swsh", N_("Swash"),			gsub_single_mask|gsub_alternate_mask },
@@ -179,13 +280,14 @@ struct opentype_feature_friendlynames friendlies[] = {
     { CHR('u','n','i','c'),	"unic", N_("Unicase"),			gsub_single_mask },
     { CHR('v','a','l','t'),	"valt", N_("Alternate Vertical Metrics"),	gpos_single_mask },
     { CHR('v','a','t','u'),	"vatu", N_("Vattu Variants"),		gsub_ligature_mask },
-    { CHR('v','e','r','t'),	"vert", N_("Vertical Alternates (obs)"),	gsub_single_mask },
+    { CHR('v','e','r','t'),	"vert", N_("Vertical Alternates"),	gsub_single_mask },
     { CHR('v','h','a','l'),	"vhal", N_("Alternate Vertical Half Metrics"),	gpos_single_mask },
     { CHR('v','j','m','o'),	"vjmo", N_("Vowel Jamo Forms"),		gsub_ligature_mask },
     { CHR('v','k','n','a'),	"vkna", N_("Vertical Kana Alternates"),	gsub_single_mask },
     { CHR('v','k','r','n'),	"vkrn", N_("Vertical Kerning"),		gpos_pair_mask|gpos_context_mask|gpos_contextchain_mask|kern_statemachine_mask },
     { CHR('v','p','a','l'),	"vpal", N_("Proportional Alternate Vertical Metrics"),	gpos_single_mask },
     { CHR('v','r','t','2'),	"vrt2", N_("Vertical Rotation & Alternates"),	gsub_single_mask },
+    { CHR('v','r','t','r'),	"vrtr", N_("Vertical Alternates for Rotation"),	gsub_single_mask },
     { CHR('z','e','r','o'),	"zero", N_("Slashed Zero"),		gsub_single_mask },
 /* This is my hack for setting the "Required feature" field of a script */
     { CHR(' ','R','Q','D'),	" RQD", N_("Required feature"),		gsub_single_mask|gsub_multiple_mask|gsub_alternate_mask|gsub_ligature_mask|gsub_context_mask|gsub_contextchain_mask|gsub_reversecchain_mask|morx_context_mask|gpos_single_mask|gpos_pair_mask|gpos_cursive_mask|gpos_mark2base_mask|gpos_mark2ligature_mask|gpos_mark2mark_mask|gpos_context_mask|gpos_contextchain_mask },
@@ -968,13 +1070,15 @@ static void RemoveNestedReferences(SplineFont *sf,int isgpos) {
 		otl->lookup_type==gpos_context || otl->lookup_type==gpos_contextchain ) {
 	    for ( sub=otl->subtables; sub!=NULL; sub=sub->next ) {
 		FPST *fpst = sub->fpst;
-		for ( i=0; i<fpst->rule_cnt; ++i ) {
-		    for ( j=0; j<fpst->rules[i].lookup_cnt; ++j ) {
-			if ( fpst->rules[i].lookups[j].lookup == otl ) {
-			    for ( k=j+1; k<fpst->rules[i].lookup_cnt; ++k )
-				fpst->rules[i].lookups[k-1] = fpst->rules[i].lookups[k];
-			    --fpst->rules[i].lookup_cnt;
-			    --j;
+		if (fpst!=NULL) {
+		    for ( i=0; i<fpst->rule_cnt; ++i ) {
+			for ( j=0; j<fpst->rules[i].lookup_cnt; ++j ) {
+			    if ( fpst->rules[i].lookups[j].lookup == otl ) {
+				for ( k=j+1; k<fpst->rules[i].lookup_cnt; ++k )
+				    fpst->rules[i].lookups[k-1] = fpst->rules[i].lookups[k];
+				--fpst->rules[i].lookup_cnt;
+				--j;
+			    }
 			}
 		    }
 		}
@@ -1185,7 +1289,7 @@ void SFRemoveLookup(SplineFont *sf,OTLookup *otl,int remove_acs) {
     OTLookupFree(otl);
 }
 
-struct lookup_subtable *SFFindLookupSubtable(SplineFont *sf,char *name) {
+struct lookup_subtable *SFFindLookupSubtable(SplineFont *sf,const char *name) {
     int isgpos;
     OTLookup *otl;
     struct lookup_subtable *sub;
@@ -1206,13 +1310,13 @@ return( sub );
 return( NULL );
 }
 
-struct lookup_subtable *SFFindLookupSubtableAndFreeName(SplineFont *sf,char *name) {
+struct lookup_subtable *SFFindLookupSubtableAndFreeName(SplineFont *sf, char *name) {
     struct lookup_subtable *sub = SFFindLookupSubtable(sf,name);
     free(name);
 return( sub );
 }
 
-OTLookup *SFFindLookup(SplineFont *sf,char *name) {
+OTLookup *SFFindLookup(SplineFont *sf,const char *name) {
     int isgpos;
     OTLookup *otl;
 
@@ -1308,17 +1412,22 @@ static struct {
     const char *text;
     uint32 tag;
 } localscripts[] = {
+    { N_("Adlam"), CHR('a','d','l','m') },
+    { N_("Ahom"), CHR('a','h','o','m') },
+    { N_("Anatolian Hieroglyphs"), CHR('h','l','u','w') },
 /* GT: See the long comment at "Property|New" */
 /* GT: The msgstr should contain a translation of "Arabic", ignore "Script|" */
     { N_("Script|Arabic"), CHR('a','r','a','b') },
-    { N_("Script|Aramaic"), CHR('a','r','a','m') },
+    { N_("Script|Aramaic"), CHR('s','a','m','r') },
     { N_("Script|Armenian"), CHR('a','r','m','n') },
-    { N_("Script|Avestan"), CHR('a','v','e','s') },
+    { N_("Script|Avestan"), CHR('a','v','s','t') },
     { N_("Script|Balinese"), CHR('b','a','l','i') },
+    { N_("Bamum"), CHR('b','a','m','u') },
+    { N_("Bassa Vah"), CHR('b','a','s','s') },
     { N_("Script|Batak"), CHR('b','a','t','k') },
     { N_("Script|Bengali"), CHR('b','e','n','g') },
     { N_("Script|Bengali2"), CHR('b','n','g','2') },
-    { N_("Bliss Symbolics"), CHR('b','l','i','s') },
+    { N_("Bhaiksuki"), CHR('b','h','k','s') },
     { N_("Bopomofo"), CHR('b','o','p','o') },
     { NU_("Brāhmī"), CHR('b','r','a','h') },
     { N_("Braille"), CHR('b','r','a','i') },
@@ -1327,112 +1436,144 @@ static struct {
     { N_("Byzantine Music"), CHR('b','y','z','m') },
     { N_("Canadian Syllabics"), CHR('c','a','n','s') },
     { N_("Carian"), CHR('c','a','r','i') },
-    { N_("Cherokee"), CHR('c','h','a','m') },
+    { N_("Caucasian Albanian"), CHR('a','g','h','b') },
+    { N_("Chakma"), CHR('c','a','k','m') },
     { N_("Script|Cham"), CHR('c','h','a','m') },
     { N_("Script|Cherokee"), CHR('c','h','e','r') },
-    { N_("Cirth"), CHR('c','i','r','t') },
     { N_("CJK Ideographic"), CHR('h','a','n','i') },
     { N_("Script|Coptic"), CHR('c','o','p','t') },
-    { N_("Cypro-Minoan"), CHR('c','p','r','t') },
-    { N_("Cypriot syllabary"), CHR('c','p','m','n') },
+    { N_("Cypriot syllabary"), CHR('c','p','r','t') },
     { N_("Cyrillic"), CHR('c','y','r','l') },
     { N_("Script|Default"), CHR('D','F','L','T') },
     { N_("Deseret (Mormon)"), CHR('d','s','r','t') },
     { N_("Devanagari"), CHR('d','e','v','a') },
     { N_("Devanagari2"), CHR('d','e','v','2') },
-/*  { N_("Egyptian demotic"), CHR('e','g','y','d') }, */
-/*  { N_("Egyptian hieratic"), CHR('e','g','y','h') }, */
-/* GT: Someone asked if FontForge actually was prepared generate hieroglyph output */
-/* GT: because of this string. No. But OpenType and Unicode have placeholders for */
-/* GT: dealing with these scripts against the day someone wants to use them. So */
-/* GT: FontForge must be prepared to deal with those placeholders if nothing else. */
-/*  { N_("Egyptian hieroglyphs"), CHR('e','g','y','p') }, */
+    { N_("Dogra"), CHR('d','o','g','r') },
+    { N_("Duployan"), CHR('d','u','p','l') },
+    { N_("Egyptian Hieroglyphs"), CHR('e','g','y','p') },
+    { N_("Elbasan"), CHR('e','l','b','a') },
     { N_("Script|Ethiopic"), CHR('e','t','h','i') },
     { N_("Script|Georgian"), CHR('g','e','o','r') },
     { N_("Glagolitic"), CHR('g','l','a','g') },
     { N_("Gothic"), CHR('g','o','t','h') },
+    { N_("Grantha"), CHR('g','r','a','n') },
     { N_("Script|Greek"), CHR('g','r','e','k') },
     { N_("Script|Gujarati"), CHR('g','u','j','r') },
     { N_("Script|Gujarati2"), CHR('g','j','r','2') },
+    { N_("Gunjala Gondi"), CHR('g','o','n','g') },
     { N_("Gurmukhi"), CHR('g','u','r','u') },
     { N_("Gurmukhi2"), CHR('g','u','r','2') },
     { N_("Hangul Jamo"), CHR('j','a','m','o') },
     { N_("Hangul"), CHR('h','a','n','g') },
+    { N_("Hanifi Rohingya"), CHR('r','o','h','g') },
     { NU_("Script|Hanunóo"), CHR('h','a','n','o') },
+    { N_("Hatran"), CHR('h','a','t','r') },
     { N_("Script|Hebrew"), CHR('h','e','b','r') },
-/*  { N_("Pahawh Hmong"), CHR('h','m','n','g') },*/
-/*  { N_("Indus (Harappan)"), CHR('i','n','d','s') },*/
-    { N_("Script|Javanese"), CHR('j','a','v','a') },
-    { N_("Kayah Li"), CHR('k','a','l','i') },
     { N_("Hiragana & Katakana"), CHR('k','a','n','a') },
-    { NU_("Kharoṣṭhī"), CHR('k','h','a','r') },
+    { N_("Imperial Aramaic"), CHR('a','r','m','i') },
+    { N_("Inscriptional Pahlavi"), CHR('p','h','l','i') },
+    { N_("Inscriptional Parthian"), CHR('p','r','t','i') },
+    { N_("Script|Javanese"), CHR('j','a','v','a') },
+    { N_("Kaithi"), CHR('k','t','h','i') },
     { N_("Script|Kannada"), CHR('k','n','d','a') },
     { N_("Script|Kannada2"), CHR('k','n','d','2') },
-    { N_("Script|Khmer"), CHR('k','h','m','r') },
+    { N_("Kayah Li"), CHR('k','a','l','i') },
     { N_("Script|Kharosthi"), CHR('k','h','a','r') },
-    { N_("Script|Lao") , CHR('l','a','o',' ') },
+    { N_("Script|Khmer"), CHR('k','h','m','r') },
+    { N_("Khojki"), CHR('k','h','o','j') },
+    { N_("Khudawadi"), CHR('s','i','n','d') },
+    { N_("Script|Lao"), CHR('l','a','o',' ') },
     { N_("Script|Latin"), CHR('l','a','t','n') },
     { NU_("Lepcha (Róng)"), CHR('l','e','p','c') },
-    { N_("Script|Limbu"), CHR('l','i','m','b') },	/* Not in ISO 15924 !!!!!, just guessing */
+    { N_("Script|Limbu"), CHR('l','i','m','b') },
     { N_("Linear A"), CHR('l','i','n','a') },
     { N_("Linear B"), CHR('l','i','n','b') },
+    { N_("Lisu"), CHR('l','i','s','u') },
     { N_("Lycian"), CHR('l','y','c','i') },
     { N_("Lydian"), CHR('l','y','d','i') },
-    { N_("Script|Mandaean"), CHR('m','a','n','d') },
-/*  { N_("Mayan hieroglyphs"), CHR('m','a','y','a') },*/
+    { N_("Mahajani"), CHR('m','a','h','j') },
+    { N_("Makasar"), CHR('m','a','k','a') },
     { NU_("Script|Malayālam"), CHR('m','l','y','m') },
     { NU_("Script|Malayālam2"), CHR('m','l','m','2') },
-    { NU_("Mathematical Alphanumeric Symbols"), CHR('m','a','t','h') },
+    { N_("Script|Mandaean"), CHR('m','a','n','d') },
+    { N_("Manichaean"), CHR('m','a','n','i') },
+    { N_("Marchen"), CHR('m','a','r','c') },
+    { N_("Masaram Gondi"), CHR('g','o','n','m') },
+    { N_("Mathematical Alphanumeric Symbols"), CHR('m','a','t','h') },
+    { N_("Medefaidrin"), CHR('m','e','d','f') },
+    { N_("Meetei Mayek"), CHR('m','t','e','i') },
+    { N_("Mende Kikakui"), CHR('m','e','n','d') },
+    { N_("Meroitic Cursive"), CHR('m','e','r','c') },
+    { N_("Meroitic Hieroglyphs"), CHR('m','e','r','o') },
+    { N_("Miao"), CHR('p','l','r','d') },
+    { N_("Modi"), CHR('m','o','d','i') },
     { N_("Script|Mongolian"), CHR('m','o','n','g') },
+    { N_("Mro"), CHR('m','r','o','o') },
+    { N_("Multani"), CHR('m','u','l','t') },
     { N_("Musical"), CHR('m','u','s','c') },
-    { N_("Script|Myanmar"), CHR('m','y','m','r') },
-    { N_("New Tai Lue"), CHR('t','a','l','u') },
+    { N_("Script|Myanmar"), CHR('m','y','m','2') },
     { N_("N'Ko"), CHR('n','k','o',' ') },
+    { N_("Nabataean"), CHR('n','b','a','t') },
+    { N_("New Tai Lue"), CHR('t','a','l','u') },
+    { N_("Newa"), CHR('n','e','w','a') },
+    { N_("Nushu"), CHR('n','s','h','u') },
     { N_("Ogham"), CHR('o','g','a','m') },
     { N_("Ol Chiki"), CHR('o','l','c','k') },
+    { N_("Old Hungarian"), CHR('h','u','n','g') },
     { N_("Old Italic (Etruscan, Oscan, etc.)"), CHR('i','t','a','l') },
+    { N_("Old North Arabian"), CHR('n','a','r','b') },
     { N_("Script|Old Permic"), CHR('p','e','r','m') },
     { N_("Old Persian cuneiform"), CHR('x','p','e','o') },
+    { N_("Old Sogdian"), CHR('s','o','g','o') },
+    { N_("Old South Arabian"), CHR('s','a','r','b') },
+    { N_("Old Turkic"), CHR('o','r','k','h') },
     { N_("Script|Oriya"), CHR('o','r','y','a') },
     { N_("Script|Oriya2"), CHR('o','r','y','2') },
+    { N_("Osage"), CHR('o','s','g','e') },
     { N_("Osmanya"), CHR('o','s','m','a') },
-    { N_("Script|Pahlavi"), CHR('p','a','l','v') },
+    { N_("Pahawh Hmong"), CHR('h','m','n','g') },
+    { N_("Palmyrene"), CHR('p','a','l','m') },
+    { N_("Pau Cin Hau"), CHR('p','a','u','c') },
     { N_("Script|Phags-pa"), CHR('p','h','a','g') },
     { N_("Script|Phoenician"), CHR('p','h','n','x') },
-    { N_("Phaistos"), CHR('p','h','s','t') },
     { N_("Pollard Phonetic"), CHR('p','l','r','d') },
+    { N_("Psalter Pahlavi"), CHR('p','h','l','p') },
     { N_("Rejang"), CHR('r','j','n','g') },
-    { N_("Rongorongo"), CHR('r','o','r','o') },
     { N_("Runic"), CHR('r','u','n','r') },
     { N_("Saurashtra"), CHR('s','a','u','r') },
+    { N_("Sharada"), CHR('s','h','r','d') },
     { N_("Shavian"), CHR('s','h','a','w') },
+    { N_("Siddham"), CHR('s','i','d','d') },
+    { N_("Sutton SignWriting"), CHR('s','g','n','w') },
     { N_("Script|Sinhala"), CHR('s','i','n','h') },
+    { N_("Sogdian"), CHR('s','o','g','d') },
+    { N_("Sora Sompeng"), CHR('s','o','r','a') },
+    { N_("Soyombo"), CHR('s','o','y','o') },
     { N_("Script|Sumero-Akkadian Cuneiform"), CHR('x','s','u','x') },
     { N_("Script|Sundanese"), CHR('s','u','n','d') },
     { N_("Script|Syloti Nagri"), CHR('s','y','l','o') },
     { N_("Script|Syriac"), CHR('s','y','r','c') },
     { N_("Script|Tagalog"), CHR('t','g','l','g') },
     { N_("Script|Tagbanwa"), CHR('t','a','g','b') },
-    { N_("Tai Le"), CHR('t','a','l','e') },	/* Not in ISO 15924 !!!!!, just guessing */
-    { N_("Tai Lu"), CHR('t','a','l','a') },	/* Not in ISO 15924 !!!!!, just guessing */
+    { N_("Tai Le"), CHR('t','a','l','e') },
+    { N_("Tai Tham"), CHR('l','a','n','a') },
+    { N_("Tai Viet"), CHR('t','a','v','t') },
+    { N_("Takri"), CHR('t','a','k','r') },
     { N_("Script|Tamil"), CHR('t','a','m','l') },
     { N_("Script|Tamil2"), CHR('t','m','l','2') },
+    { N_("Tangut"), CHR('t','a','n','g') },
     { N_("Script|Telugu"), CHR('t','e','l','u') },
     { N_("Script|Telugu2"), CHR('t','e','l','2') },
-    { N_("Tengwar"), CHR('t','e','n','g') },
     { N_("Thaana"), CHR('t','h','a','a') },
     { N_("Script|Thai"), CHR('t','h','a','i') },
     { N_("Script|Tibetan"), CHR('t','i','b','t') },
     { N_("Tifinagh (Berber)"), CHR('t','f','n','g') },
-    { N_("Script|Ugaritic"), CHR('u','g','r','t') },	/* Not in ISO 15924 !!!!!, just guessing */
+    { N_("Tirhuta"), CHR('t','i','r','h') },
+    { N_("Script|Ugaritic"), CHR('u','g','a','r') },
     { N_("Script|Vai"), CHR('v','a','i',' ') },
-/*  { N_("Visible Speech"), CHR('v','i','s','p') },*/
-    { N_("Cuneiform, Ugaritic"), CHR('x','u','g','a') },
-    { N_("Script|Yi")  , CHR('y','i',' ',' ') },
-/*  { N_("Private Use Script 1"), CHR('q','a','a','a') },*/
-/*  { N_("Private Use Script 2"), CHR('q','a','a','b') },*/
-/*  { N_("Undetermined Script"), CHR('z','y','y','y') },*/
-/*  { N_("Uncoded Script"), CHR('z','z','z','z') },*/
+    { N_("Warang Citi"), CHR('w','a','r','a') },
+    { N_("Script|Yi"), CHR('y','i',' ',' ') },
+    { N_("Zanabazar Square"), CHR('z','a','n','b') },
     { NULL, 0 }
 };
 
@@ -3058,6 +3199,8 @@ static int ContextualMatch(struct lookup_subtable *sub,struct lookup_data *data,
     int lookup_flags = sub->lookup->lookup_flags;
     const char *pt;
 
+    if (fpst==NULL)
+        return 0;
     /* If we should skip the current glyph then don't try for a match here */
     cpos = skipglyphs(lookup_flags,data,pos);
     if ( cpos!=pos )
@@ -4084,6 +4227,7 @@ return( true );
 		}
 	    }
 	}
+	otl = otl->next;
     }
 return( false );
 }
@@ -4150,10 +4294,12 @@ static void AddOTLToSllk(struct sllk *sllk, OTLookup *otl, struct scriptlanglist
 	struct lookup_subtable *sub;
 	for ( sub=otl->subtables; sub!=NULL; sub=sub->next ) {
 	    FPST *fpst = sub->fpst;
-	    for ( j=0; j<fpst->rule_cnt; ++j ) {
-		struct fpst_rule *r = &fpst->rules[j];
-		for ( k=0; k<r->lookup_cnt; ++k )
-		    AddOTLToSllk(sllk,r->lookups[k].lookup,sl);
+	    if (fpst!=NULL) {
+		for ( j=0; j<fpst->rule_cnt; ++j ) {
+		     struct fpst_rule *r = &fpst->rules[j];
+		     for ( k=0; k<r->lookup_cnt; ++k )
+			AddOTLToSllk(sllk,r->lookups[k].lookup,sl);
+		}
 	    }
 	}
     }
@@ -4740,30 +4886,32 @@ char *FPSTRule_From_Str(SplineFont *sf,FPST *fpst,struct fpst_rule *rule,
 	start = lpt;
 	if ( *start=='|' ) {
 	    if ( fpst->type==pst_contextpos || fpst->type==pst_contextsub )
-return( xasprintf( _("Separation marks only meaningful in contextual chaining lookups, starting at: %.20s..."), lpt ));
+return( smprintf( _("Separation marks only meaningful in contextual chaining lookups, starting at: %.20s..."), lpt ));
 	    if ( first==-1 )
 		first = cnt;
 	    else if ( last==-1 )
 		last = cnt-1;
 	    else
-return( xasprintf( _("Too many separation marks, starting at: %.20s..."), lpt ));
+return( smprintf( _("Too many separation marks, starting at: %.20s..."), lpt ));
 	    ++lpt;
     continue;
 	} else if ( *start=='[' ) {
 	    /* A coverage table */
 	    if ( fpst->format!=pst_coverage && fpst->format!=pst_reversecoverage )
-return( xasprintf( _("A coverage table was found in a glyph or class based contextual lookup, starting at: %.20s..."), lpt ));
+return( smprintf( _("A coverage table was found in a glyph or class based contextual lookup, starting at: %.20s..."), lpt ));
 	    ++start;
 	    for ( lpt = start; *lpt!='\0' && *lpt!=']'; ++lpt );
 	    if ( *lpt!=']' )
-return( xasprintf( _("Unterminated coverage table, starting at: %.20s..."), start-1 ));
+return( smprintf( _("Unterminated coverage table, starting at: %.20s..."), start-1 ));
 	    end = lpt++;
 	    if ( do_replacements==1 ) {
 		int rcnt, ecnt;
 		do_replacements = 2;
 		if ( cnt==0 )
-return( xasprintf( _("Replacements must follow the coverage table to which they apply: %s"), start-4 ));
+return( smprintf( _("Replacements must follow the coverage table to which they apply: %s"), start-4 ));
 		ch = *end; *end = '\0';
+		/* Must back up one! */
+		cnt--;
 		parsed[cnt].replacements = copy(start);
 		*end = ch;
 		rcnt = GlyphNameCnt(parsed[cnt].replacements);
@@ -4782,9 +4930,10 @@ return( xasprintf( _("Replacements must follow the coverage table to which they 
 		    free(parsed[cnt].replacements);
 		    parsed[cnt].replacements = newr;
 		} else
-return( xasprintf( _("There must be as many replacement glyphs as there are match glyphs: %s => %s"),
-		    parsed[cnt].entity, parsed[cnt].replacements));
-    continue;
+return( smprintf( _("There must be as many replacement glyphs as there are match glyphs: %s => %s"),
+		  parsed[cnt].entity, parsed[cnt].replacements));
+		// And advance back to where we were
+		cnt++;
 	    }
 	} else if ( *start!='@' && *start!='<' && !(*start=='=' && start[1]=='>') ) {
 	    /* Just a normal glyph or class name. (If we expect a coverage table we'll treat it as a table with one glyph) */
@@ -4794,39 +4943,40 @@ return( xasprintf( _("There must be as many replacement glyphs as there are matc
 	} else if ( *start=='=' && start[1]=='>' ) {
 	    /* A reverse contextual chaining */
 	    if ( fpst->format!=pst_reversecoverage )
-return( xasprintf( _("No replacement lists may be specified in this contextual lookup, use a nested lookup instead, starting at: %.20s..."), lpt ));
+return( smprintf( _("No replacement lists may be specified in this contextual lookup, use a nested lookup instead, starting at: %.20s..."), lpt ));
 	    if ( do_replacements )
-return( xasprintf( _("Only one replacement list may be specified in a reverse contextual chaining lookup, starting at: %.20s..."), lpt ));
-	    do_replacements = true;
+return( smprintf( _("Only one replacement list may be specified in a reverse contextual chaining lookup, starting at: %.20s..."), lpt ));
+	    do_replacements = 1;
 	    lpt += 2;
+	    continue;
 	} else {
 	    /* A lookup invocation */
 	    if ( fpst->format==pst_reversecoverage )
-return( xasprintf( _("No lookups may be specified in a reverse contextual lookup (use a replacement list instead), starting at: %.20s..."), lpt ));
+return( smprintf( _("No lookups may be specified in a reverse contextual lookup (use a replacement list instead), starting at: %.20s..."), lpt ));
 
 	    if ( *start=='@' ) {
 		for ( lpt=start+1; isspace( *lpt ); ++lpt );
 		if ( *lpt!='<' )
-return( xasprintf( _("A lookup invocation must be started by the sequence '@<' and ended with '>', starting at: %.20s..." ), start ) );
+return( smprintf( _("A lookup invocation must be started by the sequence '@<' and ended with '>', starting at: %.20s..." ), start ) );
 	    }
 	    start= ++lpt;
 	    for ( lpt = start; *lpt!='\0' && *lpt!='>'; ++lpt );
 	    if ( *lpt!='>' )
-return( xasprintf( _("Unterminated lookup invocation, starting at: %.20s..."), start-1 ));
+return( smprintf( _("Unterminated lookup invocation, starting at: %.20s..."), start-1 ));
 	    *lpt = '\0';
 	    lookup = SFFindLookup(sf,start);
 	    if ( lookup==NULL ) {
-		ret = xasprintf( _("Unknown lookup: %s"), start );
+		ret = smprintf( _("Unknown lookup: %s"), start );
 		*lpt = '>';
 return( ret );
 	    } else if ( (isgpos && lookup->lookup_type<gpos_start) || (!isgpos && lookup->lookup_type>gpos_start)) {
-		ret = xasprintf( isgpos ? _("GSUB lookup refered to in this GPOS contextual lookup: %s"):
+		ret = smprintf( isgpos ? _("GSUB lookup refered to in this GPOS contextual lookup: %s"):
 			    _("GPOS lookup refered to in this GSUB contextual lookup: %s"),
 			start );
 		*lpt = '>';
 return( ret );
 	    } else if ( cnt==0 ) {
-		ret = xasprintf( _("Lookups must follow the glyph, class or coverage table to which they apply: %s"), start );
+		ret = smprintf( _("Lookups must follow the glyph, class or coverage table to which they apply: %s"), start );
 		*lpt = '>';
 return( ret );
 	    }
@@ -4846,12 +4996,18 @@ return( ret );
 	}
 	/* We get here on glyph/class names and coverage tables */
 	/*  not on lookup invocations */
-	ch = *end; *end='\0';
-	if ( cnt>=max )
-	    parsed = realloc(parsed,(max+=200)*sizeof(MatchStr));
-	memset(&parsed[cnt],'\0',sizeof(MatchStr));
-	parsed[cnt++].entity = copy(start);
-	*end = ch;
+	/* BUT!  Don't do this if we just finished replacements! */
+	if (do_replacements == 2) {
+	    do_replacements = 3;
+	}
+	else {
+	    ch = *end; *end='\0';
+	    if ( cnt>=max )
+		parsed = realloc(parsed,(max+=200)*sizeof(MatchStr));
+	    memset(&parsed[cnt],'\0',sizeof(MatchStr));
+	    parsed[cnt++].entity = copy(start);
+	    *end = ch;
+	}
     }
 
     if ( cnt==0 )
@@ -4893,7 +5049,7 @@ return( copy( _("A reverse contextual chaining lookup can only match one coverag
 	for ( i=0; i<cnt; ++i ) {
 	    if ( SFGetChar(sf,-1,parsed[i].entity)==NULL ) {
 		if ( ret==NULL ) {
-		    ret = xasprintf( _("There is no glyph named \"%s\" in the font."), parsed[i].entity );
+		    ret = smprintf( _("There is no glyph named \"%s\" in the font."), parsed[i].entity );
 		    *return_is_warning = true;
 		}
 	    }
@@ -4970,11 +5126,11 @@ return( copy( _("A reverse contextual chaining lookup can only match one coverag
 		free( rule->u.class.fclasses ); rule->u.class.fclasses = NULL;
 		rule->u.class.bcnt = rule->u.class.fcnt = rule->u.class.ncnt = 0;
 		if ( i<first )
-return( xasprintf( _("%s is not a class name for the backtracking classes." ), parsed[i].entity ) );
+return( smprintf( _("%s is not a class name for the backtracking classes." ), parsed[i].entity ) );
 		else if ( i<=last )
-return( xasprintf( _("%s is not a class name for the matching classes." ), parsed[i].entity ) );
+return( smprintf( _("%s is not a class name for the matching classes." ), parsed[i].entity ) );
 		else
-return( xasprintf( _("%s is not a class name for the forward classes." ), parsed[i].entity ) );
+return( smprintf( _("%s is not a class name for the forward classes." ), parsed[i].entity ) );
 	    }
 	    if ( i<first )
 		rule->u.class.bclasses[first-1-i] = j;	/* Reverse the backtrack classes */
@@ -4997,7 +5153,7 @@ return( xasprintf( _("%s is not a class name for the forward classes." ), parsed
 		ch = *lpt; *lpt='\0';
 		if ( SFGetChar(sf,-1,start)==NULL ) {
 		    if ( ret==NULL ) {
-			ret = xasprintf( _("There is no glyph named \"%s\" in the font."), start );
+			ret = smprintf( _("There is no glyph named \"%s\" in the font."), start );
 			*return_is_warning = true;
 		    }
 		}
@@ -5022,11 +5178,15 @@ return( xasprintf( _("%s is not a class name for the forward classes." ), parsed
 		    parsed[i].replacements = NULL;
 		}
 	    } else
-		rule->u.coverage.ncovers[i-last-1] = parsed[i].entity;
+		rule->u.coverage.fcovers[i-last-1] = parsed[i].entity;
 	    parsed[i].entity = NULL;
 	}
       break;
       default:
+	  for ( i=0; i<cnt; i++ ) {
+	      free( parsed[i].entity );
+	      free( parsed[i].replacements );
+	  }
 return( copy( _("Bad FPST format")) );
     }
     if ( fpst->format!=pst_reversecoverage ) {

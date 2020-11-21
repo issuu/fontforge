@@ -24,14 +24,20 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _VIEWS_H
-#define _VIEWS_H
 
-#include "ffglib.h"
+#ifndef FONTFORGE_VIEWS_H
+#define FONTFORGE_VIEWS_H
+
+#include <fontforge-config.h>
+
+#include "ttfinstrs.h"
+
 #include "baseviews.h"
+#include "ffglib.h"
 
-#include <ggadget.h>
 #include "dlist.h"
+#include "ggadget.h"
+#include "search.h"
 
 
 struct gfi_data;
@@ -124,6 +130,9 @@ typedef struct debugview {
     int layer;
 } DebugView;
 
+
+#define CV_TABMAX	100
+
 enum dv_coderange { cr_none=0, cr_fpgm, cr_prep, cr_glyph };	/* cleverly chosen to match ttobjs.h */
 
 struct freehand {
@@ -141,14 +150,19 @@ typedef struct charviewtab
 {
     char charselected[ charviewtab_charselectedsz + 1 ];
     char tablabeltxt[ charviewtab_charselectedsz + 1 ];
+    float xoff, yoff;
+    real scale;
 } CharViewTab;
 
 enum { charview_cvtabssz = 100 };
 
 
+ /* approximately BACK_LAYER_MAX / 32 */
+#define BACK_LAYERS_VIEW_MAX 8
+
 typedef struct charview {
     CharViewBase b;
-    uint32 showback[BACK_LAYER_MAX/32];
+    uint32 showback[BACK_LAYERS_VIEW_MAX];
     unsigned int showfore:1;
     unsigned int showgrids:1;
     unsigned int showhhints:1;
@@ -205,8 +219,8 @@ typedef struct charview {
     
     int hvoffset;		/* for showalmosthvlines */
     int layers_off_top;
-    real scale;
     GWindow gw, v;
+    GWindow hruler, vruler; /* Ruler pixmaps */
     GGadget *vsb, *hsb, *mb, *tabs;
     GFont *small, *normal;
     GWindow icon;
@@ -225,7 +239,6 @@ typedef struct charview {
     GIC *gic;
     GIC *gwgic;
     int width, height;
-    float xoff, yoff; /* must be floating point, for precise zoom by scroll */
     int mbh;    //< menu bar height
     int charselectorh;  //< char selection input box height
     int infoh;  //< info bar height
@@ -286,7 +299,7 @@ typedef struct charview {
     struct freetype_raster *raster, *oldraster;
     DebugView *dv;
     uint32 mmvisible;
-    char *former_names[FORMER_MAX];
+    char *former_names[CV_TABMAX];
     int former_cnt;
     AnchorPoint *apmine, *apmatch;
     SplineChar *apsc;
@@ -302,7 +315,7 @@ typedef struct charview {
     int additionalCharsToShowActiveIndex;
 
     CharViewTab cvtabs[ charview_cvtabssz+1 ];
-    int oldtabnum;
+    int oldtabnum, ctpos;
     
 } CharView;
 
@@ -462,6 +475,7 @@ typedef struct fontview {
     struct lookup_subtable *cur_subtable;
     struct qg_data *qg;
     GPid pid_webfontserver;
+    bool script_unsaved; // Whether or not there's an unsaved script in script dialog
 } FontView;
 
 typedef struct findsel {
@@ -608,7 +622,7 @@ typedef struct strokedlg {
     int cv_width, cv_height;
     GGadget *mb;
     int mbh;
-    SplineSet *old_poly;
+    SplineSet *old_convex;
 /* ****** */
     int done;
     GWindow gw;
@@ -707,11 +721,8 @@ extern int _FVMenuSave(FontView *fv);
 extern int _FVMenuSaveAs(FontView *fv);
 extern int _FVMenuGenerate(FontView *fv,int family);
 extern void _FVCloseWindows(FontView *fv);
-extern char *GetPostScriptFontName(char *defdir,int mult);
+extern char *GetPostScriptFontName(char *dir, bool mult, bool modal);
 extern void MergeKernInfo(SplineFont *sf,EncMap *map);
-#ifdef FONTFORGE_CONFIG_WRITE_PFM
-extern int WritePfmFile(char *filename,SplineFont *sf, int type0, EncMap *map);
-#endif
 extern int SFGenerateFont(SplineFont *sf,int layer, int family,EncMap *map);
 
 extern void NonLinearDlg(FontView *fv,struct charview *cv);
@@ -728,7 +739,6 @@ extern void FVAutoWidth2(FontView *fv);
 extern void SC_MarkInstrDlgAsChanged(SplineChar *sc);
 
 extern void PythonUI_Init(void);
-extern void PythonUI_namedpipe_Init(void);
 
 extern void SCStroke(SplineChar *sc);
 
@@ -766,8 +776,6 @@ extern char *PST2Text(PST *pst,SplineFont *sf);
 
 void EmboldenDlg(FontView *fv, CharView *cv);
 void CondenseExtendDlg(FontView *fv, CharView *cv);
-void AddSmallCapsDlg(FontView *fv);
-void AddSubSupDlg(FontView *fv);
 void ObliqueDlg(FontView *fv, CharView *cv);
 void GlyphChangeDlg(FontView *fv, CharView *cv, enum glyphchange_type gc);
 void ItalicDlg(FontView *fv, CharView *cv);
@@ -860,8 +868,8 @@ enum outlinesfm_flags {
     sfm_stroke=0x1,
     sfm_fill=0x2,
     sfm_nothing=0x4,
-    sfm_stroke_trans = (0x1|0x8),
-    sfm_clip_preserve = 0x16
+    sfm_stroke_trans = 0x8,
+    sfm_clip = 0x16
 };
 extern void CVDrawSplineSetSpecialized( CharView *cv, GWindow pixmap, SplinePointList *set,
 					Color fg, int dopoints, DRect *clip,
@@ -892,7 +900,7 @@ extern int CVPaletteIsVisible(CharView *cv,int which);
 extern void CVPaletteSetVisible(CharView *cv,int which,int visible);
 extern void CVPalettesRaise(CharView *cv);
 extern void CVLayersSet(CharView *cv);
-extern void _CVPaletteActivate(CharView *cv,int force);
+extern void _CVPaletteActivate(CharView *cv,int force,int docking_changed);
 extern void CVPaletteActivate(CharView *cv);
 extern void CV_LayerPaletteCheck(SplineFont *sf);
 extern void CVPalettesHideIfMine(CharView *cv);
@@ -907,6 +915,7 @@ extern void CVPaletteDeactivate(void);
 extern void PalettesChangeDocking(void);
 extern int CVPalettesWidth(void);
 extern int BVPalettesWidth(void);
+extern int CVInSpiro( CharView *cv );
 
 extern void CVDoTransform(CharView *cv, enum cvtools cvt );
 
@@ -945,6 +954,7 @@ extern void CharViewFinishNonStatic();
  * not displayed.
  */
 extern CharView *CharViewCreateExtended(SplineChar *sc, FontView *fv,int enc, int show );
+extern CharViewTab *CVGetActiveTab(CharView *cv);
 extern void CharViewFree(CharView *cv);
 extern int CVValid(SplineFont *sf, SplineChar *sc, CharView *cv);
 extern void CVSetCharChanged(CharView *cv,int changed);
@@ -1097,11 +1107,6 @@ extern void GCDFillMacFeat(GGadgetCreateData *mfgcd,GTextInfo *mflabels, int wid
 	MacFeat *all, int fromprefs, GGadgetCreateData *boxes,
 	GGadgetCreateData **array);
 extern void Prefs_ReplaceMacFeatures(GGadget *list);
-
-extern unichar_t *FVOpenFont(char *title, const char *defaultfile, int mult);
-
-
-
 
 extern void ShowAboutScreen(void);
 extern void DelayEvent(void (*func)(void *), void *data);
@@ -1277,7 +1282,8 @@ extern const char *UI_TTFNameIds(int id);
 extern const char *UI_MSLangString(int language);
 extern void FontInfoInit(void);
 extern void LookupUIInit(void);
-extern enum psstrokeflags Ps_StrokeFlagsDlg(void);
+extern void _ImportParamsDlg(ImportParams *ip);
+extern void _ExportParamsDlg(ExportParams *ep);
 extern struct cidmap *AskUserForCIDMap(void);
 
 extern void DefineGroups(struct fontview *fv);
@@ -1297,6 +1303,7 @@ extern struct hslrgb *SFFontCols(SplineFont *sf,struct hslrgb fontcols[6]);
 extern Color view_bgcol;	/* Background color for views */
 extern void MVColInit(void);
 extern void CVColInit( void );
+extern void BVColInit( void );
 
 extern void FontViewRemove(FontView *fv);
 extern void FontViewFinishNonStatic();
@@ -1319,98 +1326,8 @@ extern void _CVMenuInsertPt(CharView *cv);
 extern void _CVMenuNamePoint(CharView *cv, SplinePoint *sp);
 extern void _CVMenuNameContour(CharView *cv);
 
-// sfd.c
-extern void SFD_DumpPST( FILE *sfd, SplineChar *sc );
-extern void SFD_DumpKerns( FILE *sfd, SplineChar *sc, int *newgids );
-extern void SFDDumpCharStartingMarker(FILE *sfd,SplineChar *sc);
-extern Undoes *SFDGetUndo( FILE *sfd, SplineChar *sc,
-			   const char* startTag, int current_layer );
-
-/**
- * Create, open and unlink a new temporary file. This allows the
- * caller to write to and read from the file without needing to worry
- * about cleaning up the filesystem at all.
- *
- * On Linux, this will create a new file in /tmp with a secure name,
- * open it, and delete the file from the filesystem. The application
- * can still happily use the file as it has it open, but once it is
- * closed or the application itself closes (or crashes) then the file
- * will be expunged for you by the kernel.
- *
- * The caller can fclose() the returned file. Other applications will
- * not be able to find the file by name anymore when this call
- * returns.
- *
- * This function returns 0 if error encountered.
- */
-extern FILE* MakeTemporaryFile(void);
-
-/*
- * Convert the contents of a File* to a newly allocated string
- * The caller needs to free the returned string.
- */
-extern char* FileToAllocatedString( FILE *f );
-extern char *getquotedeol(FILE *sfd);
-extern int getname(FILE *sfd, char *tokbuf);
-extern void SFDGetKerns( FILE *sfd, SplineChar *sc, char* ttok );
-extern void SFDGetPSTs( FILE *sfd, SplineChar *sc, char* ttok );
-
-/**
- * Move the sfd file pointer to the start of the next glyph. Return 0
- * if there is no next glyph. Otherwise, a copy of the string on the
- * line of the SFD file that starts the glyph is returned. The caller
- * should return the return value of this function.
- *
- * If the glyph starts with:
- * StartChar: a
- * The the return value with be "a" (sans the quotes).
- *
- * This is handy if the caller is done with a glyph and just wants to
- * skip to the start of the next one.
- */
-extern char* SFDMoveToNextStartChar( FILE* sfd );
-
-/**
- * Some references in the SFD file are to a numeric glyph ID. As a
- * sneaky method to handle that, fontforge will load these glyph
- * numbers into the pointers which should refer to the glyph. For
- * example, in kerning, instead of pointing to the splinechar for the
- * "v" glyph, the ID might be stored there, say the number 143. This
- * fixup function will convert such 143 references to being pointers
- * to the splinechar with a numeric ID of 143. It is generally a good
- * idea to do this, as some fontforge code will of course assume a
- * pointer to a splinechar is a pointer to a splinechar and not just
- * the glyph index of that splinechar.
- *
- * MIQ updated this in Oct 2012 to be more forgiving when called twice
- * or on a splinefont which has some of it's references already fixed.
- * This was to allow partial updates of data structures from SFD
- * fragments and the fixup to operate just on those references which
- * need to be fixed.
- */
-extern void SFDFixupRefs(SplineFont *sf);
-
-/**
- * Dump a single undo for the given splinechar to the file at "sfd".
- * The keyPrefix can be either Undo or Redo to generate the correct XML
- * element, and idx is the index into the undoes list that 'u' was found at
- * so that a stream of single undo/redo elements can be saved and reloaded
- * in the correct order.
- */
-extern void SFDDumpUndo(FILE *sfd,SplineChar *sc,Undoes *u, const char* keyPrefix, int idx );
-
 extern void Prefs_LoadDefaultPreferences( void );
 
-
-extern CharView* CharViewFindActive();
-extern FontViewBase* FontViewFindActive();
-extern FontViewBase* FontViewFind( int (*testFunc)( FontViewBase*, void* ), void* udata );
-
-extern int FontViewFind_byXUID(      FontViewBase* fv, void* udata );
-extern int FontViewFind_byXUIDConnected( FontViewBase* fv, void* udata );
-extern int FontViewFind_byCollabPtr(  FontViewBase* fv, void* udata );
-extern int FontViewFind_bySplineFont( FontViewBase* fv, void* udata );
-extern int FontViewFind_byCollabBasePort( FontViewBase* fv, void* udata );
 
 extern void SPSelectNextPoint( SplinePoint *sp, int state );
 extern void SPSelectPrevPoint( SplinePoint *sp, int state );
@@ -1554,8 +1471,6 @@ extern void visitAllControlPoints( GHashTable *col, visitSelectedControlPointsVi
 extern void CVVisitAdjacentToSelectedControlPoints( CharView *cv, bool preserveState,
 						    visitSelectedControlPointsVisitor f, void* udata );
 
-extern void CVFreePreTransformSPL( CharView* cv );
-
 extern bool CVShouldInterpolateCPsOnMotion( CharView* cv );
 
 extern int CVNearRBearingLine( CharView* cv, real x, real fudge );
@@ -1565,4 +1480,4 @@ extern void CVMenuConstrain(GWindow gw, struct gmenuitem *mi, GEvent *UNUSED(e))
 
 
 
-#endif	/* _VIEWS_H */
+#endif /* FONTFORGE_VIEWS_H */

@@ -24,8 +24,9 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GGADGET_H
-#define _GGADGET_H
+
+#ifndef FONTFORGE_GGADGET_H
+#define FONTFORGE_GGADGET_H
 
 #include "gdraw.h"
 #include "intl.h"
@@ -204,12 +205,10 @@ enum gg_flags { gg_visible=1, gg_enabled=2, gg_pos_in_pixels=4,
 		gg_dontcopybox=0x10000000,
 		gg_pos_use0=0x20000000, gg_pos_under=0x40000000,
 		gg_pos_newline = (int) 0x80000000,
-		gg_skip_hotkey_processing = (int) 0x100000000,
 		/* Reuse some flag values for different widgets */
 		gg_file_pulldown=gg_sb_vert, gg_file_multiple = gg_list_multiplesel,
 		gg_text_xim = gg_tabset_scroll,
-		gg_tabset_vert = gg_sb_vert,
-		gg_utf8_popup = gg_rowcol_displayonly
+		gg_tabset_vert = gg_sb_vert
 };
 
 typedef struct ggadgetdata {
@@ -235,7 +234,7 @@ typedef struct ggadgetdata {
 	int radiogroup;
     } u;
     enum gg_flags flags;
-    const unichar_t *popup_msg;		/* Brief help message */
+    const char *popup_msg;		/* Brief help message, utf-8 encoded */
     GGadgetHandler handle_controlevent;
 } GGadgetData;
 
@@ -405,6 +404,7 @@ GGadgetHandler GGadgetGetHandler(GGadget *g);
 void GTextFieldSelect(GGadget *g,int sel_start, int sel_end);
 void GTextFieldShow(GGadget *g,int pos);
 void GTextFieldReplace(GGadget *g,const unichar_t *txt);
+bool GTextFieldIsEmpty(GGadget *g);
 void GCompletionFieldSetCompletion(GGadget *g,GTextCompletionHandler completion);
 void GCompletionFieldSetCompletionMode(GGadget *g,int enabled);
 void GGadgetClearList(GGadget *g);
@@ -430,15 +430,21 @@ int GListIndexFromY(GGadget *g,int y);
 void GListSetSBAlwaysVisible(GGadget *g,int always);
 void GListSetPopupCallback(GGadget *g,void (*callback)(GGadget *,int));
 
+int GTabSetGetTabCount(GGadget *g);
 int GTabSetGetSel(GGadget *g);
 void GTabSetSetSel(GGadget *g,int sel);
 void GTabSetSetEnabled(GGadget *g,int pos, int enabled);
 GWindow GTabSetGetSubwindow(GGadget *g,int pos);
 int GTabSetGetTabLines(GGadget *g);
+void GTabSetSetClosable(GGadget *g, bool flag);
+void GTabSetSetMovable(GGadget *g, bool flag);
 void GTabSetSetNestedExpose(GGadget *g, void (*)(GWindow,GGadget *,GEvent *));
 void GTabSetSetNestedMouse(GGadget *g, int (*)(GGadget *,GEvent *));
+void GTabSetSetRemoveSync(GGadget *g, void (*rs)(GWindow gw, int pos));
+void GTabSetSetSwapSync(GGadget *g, void (*ss)(GWindow gw, int pos_a, int pos_b));
 void GTabSetChangeTabName(GGadget *g, const char *name, int pos);
 void GTabSetRemetric(GGadget *g);
+void GTabSetSwapTabs(GGadget *g, int pos_a, int pos_b);
 void GTabSetRemoveTabByPos(GGadget *g, int pos);
 void GTabSetRemoveTabByName(GGadget *g, char *name);
 
@@ -635,4 +641,4 @@ extern int GGadgetGetSkipHotkeyProcessing( GGadget *g );
 extern void GGadgetSetSkipUnQualifiedHotkeyProcessing( GGadget *g, int v );
 extern int GGadgetGetSkipUnQualifiedHotkeyProcessing( GGadget *g );
 
-#endif
+#endif /* FONTFORGE_GGADGET_H */

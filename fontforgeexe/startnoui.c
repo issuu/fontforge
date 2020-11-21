@@ -24,20 +24,28 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+#include <fontforge-version-extras.h>
+
+#include "encoding.h"
 #include "fontforgevw.h"
+#include "gfile.h"
+#include "scripting.h"
+#include "start.h"
+#include "ustring.h"
+
+#include <locale.h>
+#include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
+
 #ifndef _NO_LIBUNICODENAMES
 #include <libunicodenames.h>	/* need to open a database when we start */
 extern uninm_names_db names_db; /* Unicode character names and annotations database */
 extern uninm_blocks_db blocks_db;
 #endif
-#include <gfile.h>
-#include <ustring.h>
-#include <ltdl.h>
-#include <time.h>
-#include <sys/time.h>
-#include <locale.h>
-#include <unistd.h>
-#include <dynamic.h>
+
 #ifdef __Mac
 # include <stdlib.h>		/* getenv,setenv */
 #endif
@@ -71,17 +79,17 @@ exit(0);
 
 static void doscripthelp(void) {
     _doscriptusage();
-    /*help("overview.html");*/
 exit(0);
 }
 
 int fontforge_main( int argc, char **argv ) {
-    extern const char *source_version_str;
-    extern const char *source_modtime_str;
+    time_t tm = FONTFORGE_MODTIME_RAW;
+    struct tm* modtime = gmtime(&tm);
 
-    fprintf( stderr, "Copyright (c) 2000-2014 by George Williams. See AUTHORS for Contributors.\n" );
+    fprintf( stderr, "Copyright (c) 2000-%d. See AUTHORS for Contributors.\n", modtime->tm_year+1900 );
     fprintf( stderr, " License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n" );
     fprintf( stderr, " with many parts BSD <http://fontforge.org/license.html>. Please read LICENSE.\n" );
+    fprintf( stderr, " Version: %s\n", FONTFORGE_VERSION );
     fprintf( stderr, " Based on sources from %s"
 #ifdef FREETYPE_HAS_DEBUGGER
 	    "-TtfDb"
@@ -94,7 +102,10 @@ int fontforge_main( int argc, char **argv ) {
 #endif
 	    ".\n",
 	    FONTFORGE_MODTIME_STR );
-    fprintf( stderr, " Based on source from git with hash: %s\n", FONTFORGE_GIT_VERSION );
+    // Can be empty if e.g. building from a tarball
+    if (FONTFORGE_GIT_VERSION[0] != '\0') {
+	fprintf( stderr, " Based on source from git with hash: %s\n", FONTFORGE_GIT_VERSION );
+    }
 
     FindProgDir(argv[0]);
     InitSimpleStuff();
@@ -116,7 +127,7 @@ int fontforge_main( int argc, char **argv ) {
 	else if ( strcmp(pt,"-help")==0 )
 	    doscripthelp();
 	else if ( strcmp(pt,"-version")==0 || strcmp(pt,"-v")==0 || strcmp(pt,"-V")==0 )
-	    doversion(FONTFORGE_MODTIME_STR);
+	    doversion(FONTFORGE_VERSION);
     }
 #  if defined(_NO_PYTHON)
     ProcessNativeScript(argc, argv,stdin);
@@ -129,6 +140,5 @@ int fontforge_main( int argc, char **argv ) {
     uninm_blocks_db_close(blocks_db);
 #endif
 
-    lt_dlexit();
 return( 0 );
 }

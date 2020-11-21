@@ -25,26 +25,30 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
-#include "inc/basics.h"
-#include "ustring.h"
-#include "fileutil.h"
-#include "gfile.h"
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/stat.h>		/* for mkdir */
-#include <unistd.h>
-#include <glib.h>
-#include <glib/gstdio.h>
-#include <errno.h>			/* for mkdir_p */
+#include <fontforge-config.h>
 
-static char dirname_[MAXPATHLEN+1];
+#include "basics.h"
+#include "ffglib.h"
+#include "gfile.h"
+#include "ustring.h"
+
+#include <errno.h>			/* for mkdir_p */
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/param.h>
+#include <sys/stat.h>		/* for mkdir */
+#include <sys/types.h>
+#include <unistd.h>
+
 #if !defined(__MINGW32__)
  #include <pwd.h>
 #else
- #include <windows.h>
  #include <shlobj.h>
+ #include <windows.h>
 #endif
+
+static char *program_dir = NULL;
+static char dirname_[MAXPATHLEN+1];
 
 /**
  * \brief Removes the extension from a file path, if it exists.
@@ -129,39 +133,18 @@ return -ENOTDIR;
 	for(p = tmp + 1; *p; p++)
 	if(*p == '/') {
 		*p = 0;
-		r = mkdir(tmp, mode);
+		r = GFileMkDir(tmp, mode);
 		if (r < 0 && errno != EEXIST)
 return -errno;
 		*p = '/';
 	}
 
 	/* try to make the whole path */
-	r = mkdir(tmp, mode);
+	r = GFileMkDir(tmp, mode);
 	if(r < 0 && errno != EEXIST)
 return -errno;
 	/* creation successful or the file already exists */
 return EXIT_SUCCESS;
-}
-
-/* Wrapper for formatted variable list printing. */
-char *smprintf(const char *fmt, ...) {
-	va_list fmtargs;
-	char *ret;
-	int len;
-
-	va_start(fmtargs, fmt);
-	len = vsnprintf(NULL, 0, fmt, fmtargs);
-	va_end(fmtargs);
-	ret = malloc(++len);
-	if (ret == NULL) {
-	perror("malloc");
-exit(EXIT_FAILURE);
-	}
-
-	va_start(fmtargs, fmt);
-	vsnprintf(ret, len, fmt, fmtargs);
-	va_end(fmtargs);
-return ret;
 }
 
 char *GFileGetHomeDir(void) {
@@ -246,6 +229,9 @@ char *GFileGetAbsoluteName(const char *name, char *result, size_t rsiz) {
 		savestrcpy(spt,spt+1); /*  skipped past the :// of the machine name) */
 	    else if ( pt==spt+1 && spt[0]=='.' && *pt=='/' ) {	/* Noop */
 		savestrcpy(spt,spt+2);
+	    } else if (pt==spt+1 && spt[0]=='.' && *pt=='\0') { /* Remove trailing /. */
+		pt = --spt;
+		*spt = '\0';
 	    } else if ( pt==spt+2 && spt[0]=='.' && spt[1]=='.' ) {
 		for ( bpt=spt-2 ; bpt>rpt && *bpt!='/'; --bpt );
 		if ( bpt>=rpt && *bpt=='/' ) {
@@ -415,6 +401,61 @@ return( access(file,04)==0 );
 }
 
 /**
+ *  Creates a temporary file, similar to tmpfile.
+ *  Used because the default tmpfile implementation on Windows is broken
+ */
+FILE *GFileTmpfile() {
+#ifndef _WIN32
+    return tmpfile();
+#else
+    wchar_t temp_path[MAX_PATH + 1];
+    DWORD ret = GetTempPathW(MAX_PATH + 1, temp_path);
+    if (!ret) {
+        return NULL;
+    }
+
+    while(true) {
+        wchar_t *temp_name = _wtempnam(temp_path, L"FF_");
+        if (!temp_name) {
+            return NULL;
+        }
+
+        HANDLE handle = CreateFileW(
+            temp_name,
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            NULL,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+            NULL
+        );
+        free(temp_name);
+
+        if (handle == INVALID_HANDLE_VALUE) {
+            if (GetLastError() != ERROR_FILE_EXISTS) {
+                return NULL;
+            }
+        } else {
+            int fd = _open_osfhandle((intptr_t)handle, _O_RDWR|_O_CREAT|_O_TEMPORARY|_O_BINARY);
+            if (fd == -1) {
+                CloseHandle(handle);
+                return NULL;
+            }
+
+            FILE *fp = _fdopen(fd, "w+");
+            if (!fp) {
+                _close(fd);
+                return NULL;
+            }
+
+            return fp;
+        }
+    }
+    return NULL;
+#endif
+}
+
+/**
  * Removes a file or folder.
  *
  * @param [in] path The path to be removed.
@@ -445,8 +486,12 @@ int GFileRemove(const char *path, int recursive) {
     return true;
 }
 
-int GFileMkDir(const char *name) {
-return( mkdir(name,0755));
+int GFileMkDir(const char *name, int mode) {
+#ifndef _WIN32
+	return mkdir(name, mode);
+#else
+	return mkdir(name);
+#endif
 }
 
 int GFileRmDir(const char *name) {
@@ -460,6 +505,10 @@ return(unlink(name));
 char *_GFile_find_program_dir(char *prog) {
     char *pt, *path, *program_dir=NULL;
     char filename[2000];
+
+    if (prog == NULL) {
+        return NULL;
+    }
 
 #if defined(__MINGW32__)
     char* pt1 = strrchr(prog, '/');
@@ -740,7 +789,7 @@ return( access(buffer,04)==0 );
 int u_GFileMkDir(unichar_t *name) {
     char buffer[1024];
     u2def_strncpy(buffer,name,sizeof(buffer));
-return( mkdir(buffer,0755));
+	return GFileMkDir(buffer, 0755);
 }
 
 int u_GFileRmDir(unichar_t *name) {
@@ -755,26 +804,11 @@ int u_GFileUnlink(unichar_t *name) {
 return(unlink(buffer));
 }
 
-static char *GResourceProgramDir = 0;
-
-char* getGResourceProgramDir(void) {
-    return GResourceProgramDir;
-}
-
-char* getLibexecDir_NonWindows(void) 
-{
-    // FIXME this was indirectly introduced by
-    // https://github.com/fontforge/fontforge/pull/1838 and is not
-    // tested on Windows yet.
-    //
-    static char path[PATH_MAX+4];
-    snprintf( path, PATH_MAX, "%s/../libexec/", getGResourceProgramDir());
-    return path;
-}
-
-
-
 void FindProgDir(char *prog) {
+    if (program_dir != NULL) {
+        return;
+    }
+
 #if defined(__MINGW32__)
     char  path[MAX_PATH+4];
     char* c = path;
@@ -788,13 +822,11 @@ void FindProgDir(char *prog) {
     	}
     }
     if(tail) *tail='\0';
-    GResourceProgramDir = copy(path);
+    program_dir = copy(path);
 #else
-    GResourceProgramDir = _GFile_find_program_dir(prog);
-    if ( GResourceProgramDir==NULL ) {
-	char filename[1025];
-	GFileGetAbsoluteName(".",filename,sizeof(filename));
-	GResourceProgramDir = copy(filename);
+    program_dir = _GFile_find_program_dir(prog);
+    if ( program_dir==NULL ) {
+        program_dir = smprintf("%s/%s", FONTFORGE_INSTALL_PREFIX, "bin");
     }
 #endif
 }
@@ -811,20 +843,14 @@ char *getShareDir(void) {
     set = true;
 
     //Assume share folder is one directory up
-    pt = strrchr(GResourceProgramDir, '/');
+    pt = strrchr(program_dir, '/');
     if ( pt==NULL ) {
-#ifdef SHAREDIR
-	return( sharedir = SHAREDIR );
-#elif defined( PREFIX )
-	return( sharedir = PREFIX "/share" );
-#else
-	pt = GResourceProgramDir + strlen(GResourceProgramDir);
-#endif
+	pt = program_dir + strlen(program_dir);
     }
-    len = (pt-GResourceProgramDir)+strlen("/share/fontforge")+1;
+    len = (pt-program_dir)+strlen("/share/fontforge")+1;
     sharedir = malloc(len);
-    strncpy(sharedir,GResourceProgramDir,pt-GResourceProgramDir);
-    strcpy(sharedir+(pt-GResourceProgramDir),"/share/fontforge");
+    strncpy(sharedir,program_dir,pt-program_dir);
+    strcpy(sharedir+(pt-program_dir),"/share/fontforge");
     return( sharedir );
 }
 
@@ -869,9 +895,6 @@ char *getHelpDir(void) {
 	return( sharedir );
 
     char* prefix = getShareDir();
-#if defined(DOCDIR)
-    prefix = DOCDIR;
-#endif
     const char* postfix = "/../doc/fontforge/";
     int len = strlen(prefix) + strlen(postfix) + 2;
     sharedir = malloc(len);

@@ -24,11 +24,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgeui.h"
-#include <math.h>
-#include <ustring.h>
+
+#include <fontforge-config.h>
 
 #include "cvruler.h"
+#include "fontforgeui.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+
+#include <math.h>
 
 int measuretoolshowhorizontolvertical = true;
 Color measuretoollinecol = 0x000000;
@@ -46,9 +51,9 @@ static void SlopeToBuf(char *buf,char *label,double dx, double dy) {
     if ( dx==0 && dy==0 )
 	sprintf( buf, _("%s No Slope"), label );
     else if ( dx==0 )
-	sprintf( buf, "%s dy/dx= ∞, %4g°", label, atan2(dy,dx)*180/3.1415926535897932);
+	sprintf( buf, "%s dy/dx= ∞, %4g°", label, atan2(dy,dx)*180/FF_PI);
     else
-	sprintf( buf, "%s dy/dx= %4g, %4g°", label, dy/dx, atan2(dy,dx)*180/3.1415926535897932);
+	sprintf( buf, "%s dy/dx= %4g, %4g°", label, dy/dx, atan2(dy,dx)*180/FF_PI);
 }
 
 static void CurveToBuf(char *buf,CharView *cv,Spline *s, double t) {
@@ -90,7 +95,7 @@ static int RulerText(CharView *cv, unichar_t *ubuf, int line) {
 	    sprintf( buf, "%f,%f", (double) cv->info.x, (double) cv->info.y);
 	else
 	    sprintf( buf, "%f %.0f° (%f,%f)", (double) len,
-		    atan2(yoff,xoff)*180/3.1415926535897932,
+		    atan2(yoff,xoff)*180/FF_PI,
 		    (double) xoff,(double) yoff);
       break; }
       case 1:
@@ -588,6 +593,7 @@ static void RulerLingerPlace(CharView *cv, GEvent *event) {
 }
 
 static void RulerLingerMove(CharView *cv) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     if ( cv->ruler_linger_w ) {
 	int x, y;
 	GRect size;
@@ -599,8 +605,8 @@ static void RulerLingerMove(CharView *cv) {
 	GDrawGetSize(cv->ruler_linger_w,&rsize);
 	GDrawGetSize(cv->gw,&csize);
 
-	pt.x = cv->xoff + rint(cv->ruler_intersections[cv->num_ruler_intersections-1].x*cv->scale);
-	pt.y = -cv->yoff + cv->height - rint(cv->ruler_intersections[cv->num_ruler_intersections-1].y*cv->scale);
+	pt.x = tab->xoff + rint(cv->ruler_intersections[cv->num_ruler_intersections-1].x*tab->scale);
+	pt.y = -tab->yoff + cv->height - rint(cv->ruler_intersections[cv->num_ruler_intersections-1].y*tab->scale);
 	GDrawTranslateCoordinates(cv->v,GDrawGetRoot(NULL),&pt);
 	x = pt.x + infowindowdistance;
 	if ( x+rsize.width>size.width )
@@ -651,13 +657,14 @@ return;
 // The following code may be unnecessary, and it can cause an infinite stack loop.
 // One would hope that the event queue can take care of these things when we return to it.
 // We'll find out.
-#if 0
-    GDrawProcessPendingEvents(NULL);		/* The resize needs to happen before the expose */
-    if ( !cv->p.pressed && (event->u.mouse.state&ksm_meta) ) /* but a mouse up might sneak in... */
-return;
+//#if 0
+//    GDrawProcessPendingEvents(NULL);		/* The resize needs to happen before the expose */
+//    if ( !cv->p.pressed && (event->u.mouse.state&ksm_meta) ) /* but a mouse up might sneak in... */
+//return;
     GDrawRequestExpose(cv->ruler_w,NULL,false);
-    GDrawRequestExpose(cv->v,NULL,false);
-#endif // 0
+    if (cv->p.pressed)
+        GDrawRequestExpose(cv->v,NULL,false);
+//#endif // 0
 }
 
 void CVMouseUpRuler(CharView *cv, GEvent *event) {
@@ -760,7 +767,7 @@ return( buffer );
       break;
       case 4:
 	dx = cp->x - sp->me.x; dy = cp->y - sp->me.y;
-	snprintf( buffer, blen, "∠ %g°", atan2(dy,dx)*180/3.1415926535897932 );
+	snprintf( buffer, blen, "∠ %g°", atan2(dy,dx)*180/FF_PI );
       break;
       case 5:
 	if ( s==NULL )
@@ -804,6 +811,7 @@ return( true );
 }
 	
 static void CpInfoPlace(CharView *cv, GEvent *event) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     char buf[100];
     int line, which;
     int width, x, y;
@@ -865,8 +873,8 @@ static void CpInfoPlace(CharView *cv, GEvent *event) {
     if ( !cv->p.prevcp && !cv->p.nextcp )
 	sp = cv->active_sp;
     if ( sp!=NULL ) {
-	x =  cv->xoff + rint(sp->me.x*cv->scale);
-	y = -cv->yoff + cv->height - rint(sp->me.y*cv->scale);
+	x =  tab->xoff + rint(sp->me.x*tab->scale);
+	y = -tab->yoff + cv->height - rint(sp->me.y*tab->scale);
 	if ( x>=0 && y>=0 && x<cv->width && y<cv->height ) {
 	    pt2.x = x; pt2.y = y;
 	    GDrawTranslateCoordinates(cv->v,GDrawGetRoot(NULL),&pt2);
@@ -898,7 +906,7 @@ static void CpInfoPlace(CharView *cv, GEvent *event) {
 }
 
 void CPStartInfo(CharView *cv, GEvent *event) {
-    printf("CPStartInfo() showcp:%d pressed:%d rw:%p\n", cv->showcpinfo, cv->p.pressed, cv->ruler_w );
+//    printf("CPStartInfo() showcp:%d pressed:%d rw:%p\n", cv->showcpinfo, cv->p.pressed, cv->ruler_w );
 
     if ( !cv->showcpinfo )
 return;
@@ -948,28 +956,31 @@ void CPEndInfo(CharView *cv) {
 }
 
 void CVRulerExpose(GWindow pixmap,CharView *cv) {
+    CharViewTab* tab = CVGetActiveTab(cv);
+
     if ( cv->b1_tool!=cvt_ruler && cv->b1_tool_old!=cvt_ruler ) {
 	cv->num_ruler_intersections = 0;
 return;
     }
 
     if ( cv->num_ruler_intersections >= 2 ) {
-	int x =  cv->xoff + rint(cv->ruler_intersections[0].x*cv->scale);
-	int y = -cv->yoff + cv->height - rint(cv->ruler_intersections[0].y*cv->scale);
-	int xend =  cv->xoff + rint(cv->ruler_intersections[cv->num_ruler_intersections-1].x*cv->scale);
-	int yend = -cv->yoff + cv->height - rint(cv->ruler_intersections[cv->num_ruler_intersections-1].y*cv->scale);
+	int x =  tab->xoff + rint(cv->ruler_intersections[0].x*tab->scale);
+	int y = -tab->yoff + cv->height - rint(cv->ruler_intersections[0].y*tab->scale);
+	int xend =  tab->xoff + rint(cv->ruler_intersections[cv->num_ruler_intersections-1].x*tab->scale);
+	int yend = -tab->yoff + cv->height - rint(cv->ruler_intersections[cv->num_ruler_intersections-1].y*tab->scale);
 	real xdist = fabs(cv->ruler_intersections[0].x - cv->ruler_intersections[cv->num_ruler_intersections-1].x);
 	real ydist = fabs(cv->ruler_intersections[0].y - cv->ruler_intersections[cv->num_ruler_intersections-1].y);
 	int i;
 	int len;
 	int charwidth = 6; /* TBD */
 	Color textcolor = (cv->start_intersection_snapped && cv->end_intersection_snapped) ? measuretoolcanvasnumberssnappedcol : measuretoolcanvasnumberscol;
+	GRect prev_rect;
 
 	if ( measuretoolshowhorizontolvertical ) {
 	    char buf[40];
 	    unichar_t ubuf[40];
 
-	    if ( xdist*cv->scale>10.0 && ydist*cv->scale>10.0 ) {
+	    if ( xdist*tab->scale>10.0 && ydist*tab->scale>10.0 ) {
 
 		GDrawSetFont(pixmap,cv->rfont);
 		len = snprintf(buf,sizeof buf,"%g",xdist);
@@ -990,10 +1001,10 @@ return;
 
 	GDrawSetFont(pixmap,cv->rfont);
 	for ( i=0 ; i<cv->num_ruler_intersections; ++i ) {
-	    GRect rect,prev_rect;
+	    GRect rect;
 
-	    rect.x = cv->xoff + rint(cv->ruler_intersections[i].x*cv->scale) - 1;
-	    rect.y = -cv->yoff + cv->height - rint(cv->ruler_intersections[i].y*cv->scale) - 1;
+	    rect.x = tab->xoff + rint(cv->ruler_intersections[i].x*tab->scale) - 1;
+	    rect.y = -tab->yoff + cv->height - rint(cv->ruler_intersections[i].y*tab->scale) - 1;
 	    rect.width = 3;
 	    rect.height = 3;
 

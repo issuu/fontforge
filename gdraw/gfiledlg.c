@@ -24,13 +24,14 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdlib.h>
-#include <string.h>
-#include "ustring.h"
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
-#include "gwidget.h"
 #include "ggadget.h"
 #include "ggadgetP.h"
+#include "gwidget.h"
+#include "ustring.h"
 
 struct gfc_data {
     int done;
@@ -111,7 +112,7 @@ static unichar_t *GWidgetOpenFileWPath(const unichar_t *title, const unichar_t *
     memset(&gcd,0,sizeof(gcd));
     memset(&boxes,0,sizeof(boxes));
     gcd[0].gd.pos.x = 12; gcd[0].gd.pos.y = 6;
-    gcd[0].gd.pos.width = 223-24; gcd[0].gd.pos.height = 180;
+    gcd[0].gd.pos.width = 223; gcd[0].gd.pos.height = 180;
     gcd[0].gd.flags = gg_visible | gg_enabled;
     gcd[0].creator = GFileChooserCreate;
     varray[0] = &gcd[0]; varray[1] = NULL;

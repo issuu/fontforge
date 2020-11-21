@@ -24,9 +24,12 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "gdrawP.h"
+#include "ggadget.h"
 #include "gwidgetP.h"
-#include "../gdraw/gdrawP.h"
-#include <ggadget.h>
 
 /* Temporarily do all drawing in this widget to a pixmap rather than the window */
 /*  if events are orderly then we can share one pixmap for all windows */
@@ -34,6 +37,7 @@ static GWindow pixmap, cairo_pixmap;
 /*  otherwise we create and destroy pixmaps */
 
 GWindow _GWidget_GetPixmap(GWindow gw,GRect *rect) {
+#ifndef FONTFORGE_CAN_USE_GDK
     GWindow ours;
 
     if ( gw->display!=screen_display )
@@ -50,7 +54,7 @@ return( gw );
 		GDrawDestroyWindow(cairo_pixmap);
 	    /* The 0x8000 on width is a hack to tell create pixmap to use*/
 	    /*  cairo convas */
-	    cairo_pixmap = GDrawCreatePixmap(gw->display,0x8000|gw->pos.width,gw->pos.height);
+	    cairo_pixmap = GDrawCreatePixmap(gw->display,gw,0x8000|gw->pos.width,gw->pos.height);
 	}
 	ours = cairo_pixmap;
 	cairo_pixmap = NULL;
@@ -59,7 +63,7 @@ return( gw );
 			     pixmap->pos.height<rect->y+rect->height ) {
 	    if ( pixmap!=NULL )
 		GDrawDestroyWindow(pixmap);
-	    pixmap = GDrawCreatePixmap(gw->display,gw->pos.width,gw->pos.height);
+	    pixmap = GDrawCreatePixmap(gw->display,gw,gw->pos.width,gw->pos.height);
 	}
 	ours = pixmap;
 	pixmap = NULL;
@@ -76,9 +80,14 @@ return( gw );
 	GDrawFillRect(ours,rect,gw->ggc->bg);
     }
 return( ours );
+#else
+    GDrawFillRect(gw, rect, gw->ggc->bg);
+    return gw;
+#endif /* FONTFORGE_CAN_USE_GDK */
 }
 
 void _GWidget_RestorePixmap(GWindow gw, GWindow ours, GRect *rect) {
+#ifndef FONTFORGE_CAN_USE_GDK
     GWidgetD *gd = (GWidgetD *) (gw->widget_data);
 
     if ( gw==ours )
@@ -107,4 +116,5 @@ return;				/* it wasn't a pixmap, all drawing was to real window */
 #ifdef UsingPThreads
     End critical section
 #endif
+#endif /* FONTFORGE_CAN_USE_GDK */
 }

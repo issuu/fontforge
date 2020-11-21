@@ -24,19 +24,19 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _BASICS_H
-#define _BASICS_H
+
+#ifndef FONTFORGE_BASICS_H
+#define FONTFORGE_BASICS_H
 
 #include <fontforge-config.h>
-#include <stdio.h>		/* for NULL */
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#else
+
 #include <inttypes.h>
-#endif
-#include <stdlib.h>		/* for free */
 #include <limits.h>
+#include <memory.h>
 #include <stdbool.h>
+#include <stdio.h>		/* for NULL */
+#include <stdlib.h>		/* for free */
+#include <string.h>
 
 typedef int32_t		int32;
 typedef uint32_t	uint32;
@@ -49,6 +49,8 @@ typedef uint8_t		uint8;
 typedef intptr_t	intpt;
 
 typedef uint32 unichar_t;
+
+#define FF_PI 3.1415926535897932
 
 /* A macro to mark unused function parameters with. We often
  * have such parameters, because of extensive use of callbacks.
@@ -64,10 +66,19 @@ typedef uint32 unichar_t;
 
 /* A macro to print a string for debug purposes
  */
-#ifdef FONTFORGE_DEBUG
-#define TRACE(...) printf(__VA_ARGS__)
+#ifndef NDEBUG
+#define TRACE(...) fprintf(stderr, __VA_ARGS__)
 #else
-#define TRACE(...)
+#define TRACE(...) while(0)
+#endif
+
+/* assert() with an otherwise unused variable
+ * to get around "unused" compiler warnings
+ */
+#ifndef NDEBUG
+#define VASSERT(v) assert(v)
+#else
+#define VASSERT(v) ((void)(v))
 #endif
 
 extern void NoMoreMemMessage(void);
@@ -122,4 +133,4 @@ static inline int imax(int a, int b)
 		    }
 
 
-#endif
+#endif /* FONTFORGE_BASICS_H */

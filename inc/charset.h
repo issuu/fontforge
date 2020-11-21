@@ -24,13 +24,23 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _CHARSET_H
-#define _CHARSET_H
+
+#ifndef FONTFORGE_CHARSET_H
+#define FONTFORGE_CHARSET_H
+
+#if HAVE_ICONV_H
+# include <iconv.h>
+extern char *iconv_local_encoding_name;
+#else
+# include "gwwiconv.h"		/* My fake iconv based on encodings in gdraw/gunicode */
+#endif
+
 /* ASCII is ISO 646, except the ISO version admits national alternatives */
 enum encoding { e_usascii, e_iso646_no, e_iso646_se, e_iso8859_1,
     e_iso8859_2, e_iso8859_3, e_iso8859_4, e_iso8859_5, e_iso8859_6,
     e_iso8859_7, e_iso8859_8, e_iso8859_9, e_iso8859_10,
     e_iso8859_11/* same as TIS */, e_iso8859_13, e_iso8859_14, e_iso8859_15,
+    e_iso8859_16,
     e_koi8_r,	/* RFC 1489 */
     e_jis201,	/* 8 bit, ascii & katakana */
     e_win, e_mac,
@@ -52,6 +62,7 @@ enum charset { em_none = -1,
     em_iso8859_1, em_iso8859_2, em_iso8859_3, em_iso8859_4, em_iso8859_5,
     em_iso8859_6, em_iso8859_7, em_iso8859_8, em_iso8859_9, em_iso8859_10,
     em_iso8859_11/* same as TIS */, em_iso8859_13, em_iso8859_14, em_iso8859_15,
+    em_iso8859_16,
     em_koi8_r,
     em_jis201,
     em_win, em_mac, em_symbol, em_zapfding, em_user, em_adobestandard=em_user,
@@ -61,11 +72,7 @@ enum charset { em_none = -1,
     em_unicode, em_unicode4, em_gb18030 , em_max, em_first2byte=em_jis208, em_last94x94=em_gb2312 };
 
 extern int /*enum charset*/ local_encoding;
-#if HAVE_ICONV
-# include <iconv.h>
-extern char *iconv_local_encoding_name;
-#else
-# include "gwwiconv.h"		/* My fake iconv based on encodings in gdraw/gunicode */
-#endif
+
 extern struct namemap { const char *name; int map; } encodingnames[];
-#endif
+
+#endif /* FONTFORGE_CHARSET_H */

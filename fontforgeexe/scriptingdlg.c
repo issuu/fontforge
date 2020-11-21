@@ -25,15 +25,19 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
 #if !defined(_NO_FFSCRIPT) || !defined(_NO_PYTHON)
 
+#include "cvundoes.h"
 #include "fontforgeui.h"
-#include <gresource.h>
-#include <utype.h>
-#include <ustring.h>
-#include <gkeysym.h>
-#include "scripting.h"
+#include "gfile.h"
+#include "gkeysym.h"
+#include "gresource.h"
 #include "scriptfuncs.h"
+#include "scripting.h"
+#include "ustring.h"
+#include "utype.h"
 
 struct sd_data {
     int done;
@@ -78,16 +82,13 @@ static void ExecNative(GGadget *g, GEvent *e) {
     struct sd_data *sd = GDrawGetUserData(GGadgetGetWindow(g));
     Context c;
     Val args[1];
-    Array *dontfree[1];
     jmp_buf env;
 
     memset( &c,0,sizeof(c));
     memset( args,0,sizeof(args));
-    memset( dontfree,0,sizeof(dontfree));
     running_script = true;
     c.a.argc = 1;
     c.a.vals = args;
-    c.dontfree = dontfree;
     c.filename = args[0].u.sval = "ScriptDlg";
     args[0].type = v_str;
     c.return_val.type = v_void;
@@ -98,7 +99,7 @@ static void ExecNative(GGadget *g, GEvent *e) {
 return;			/* Error return */
     }
 
-    c.script = tmpfile();
+    c.script = GFileTmpfile();
     if ( c.script==NULL )
 	ScriptError(&c, "Can't create temporary file");
     else {
@@ -188,9 +189,13 @@ return( true );
     
     if ( event->type==et_close ) {
 	SD_DoCancel( sd );
+    } else if ( event->type==et_controlevent && event->u.control.subtype==et_textchanged ) {
+    sd->fv->script_unsaved = !GTextFieldIsEmpty(GWidgetGetControl(sd->gw,CID_Script));
+    } else if ( event->type==et_controlevent && event->u.control.subtype==et_save ) {
+    sd->fv->script_unsaved = false;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("scripting.html");
+	    help("scripting/scripting.html", NULL);
 return( true );
 	}
 return( false );

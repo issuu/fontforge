@@ -24,10 +24,11 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GWWICONV_H
-#define _GWWICONV_H
 
-# ifndef HAVE_ICONV
+#ifndef FONTFORGE_GWWICONV_H
+#define FONTFORGE_GWWICONV_H
+
+# ifndef HAVE_ICONV_H
 #  define __need_size_t
 #  include <stdlib.h>		/* For size_t */
 
@@ -39,10 +40,33 @@ extern size_t gww_iconv( gww_iconv_t cd,
         char **inbuf, size_t *inlen,
         char **outbuf, size_t *outlen);
 
-#define iconv_t		gww_iconv_t
-#define iconv_open	gww_iconv_open
-#define iconv_close	gww_iconv_close
-#define iconv		gww_iconv
+#  define iconv_t		gww_iconv_t
+#  define iconv_open	gww_iconv_open
+#  define iconv_close	gww_iconv_close
+#  define iconv			gww_iconv
 
-# endif		/* HAVE_ICONV */
-#endif		/* _GWWICONV_H */
+#  define iconv_arg2_t	char **
+
+# else		/* HAVE_ICONV_H */
+
+#  include <iconv.h>
+#  ifdef __Mac
+#   include <xlocale.h>
+#  endif
+
+/* libiconv.h defines iconv as taking a const pointer for inbuf. iconv doesn't*/
+/* OH, JOY! A new version of libiconv does not use the const! Even better, the man page says it does */
+#  ifdef _LIBICONV_VERSION
+#   if _LIBICONV_VERSION >= 0x10B
+#    define ICONV_CONST
+#   else
+#    define ICONV_CONST	const
+#   endif
+#  else		/* _LIBICONV_VERSION*/
+#   define ICONV_CONST
+#  endif		/* _LIBICONV_VERSION */
+
+#  define iconv_arg2_t ICONV_CONST char **
+# endif		/* HAVE_ICONV_H */
+
+#endif /* FONTFORGE_GWWICONV_H */

@@ -25,15 +25,31 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "parsepdf.h"
+
+#include "chardata.h"
+#include "cvimages.h"
+#include "dumppfa.h"
+#include "encoding.h"
 #include "fontforge.h"
-#include <chardata.h>
-#include <utype.h>
-#include <ustring.h>
-#include <math.h>
-#include <locale.h>
-#include <gwidget.h>
+#include "gfile.h"
+#include "gwidget.h"
+#include "namelist.h"
+#include "parsepfa.h"
+#include "parsettf.h"
 #include "psfont.h"
+#include "psread.h"
 #include "sd.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
+#include <math.h>
 
 #ifdef HAVE_IEEEFP_H
 # include <ieeefp.h>		/* Solaris defines finite in ieeefp rather than math.h */
@@ -779,22 +795,8 @@ static void pdf_85filter(FILE *to,FILE *from) {
     }
 }
 
-#ifdef _NO_LIBPNG
-
-static int haszlib(void) {
-return( false );
-}
-
-static void pdf_zfilter(FILE *to,FILE *from) {
-}
-
-#else
 
 # include <zlib.h>
-
-static int haszlib(void) {
-return( true );
-}
 
 #define Z_CHUNK	65536
 /* Copied with few mods from the zlib howto */
@@ -840,7 +842,6 @@ return ret;
     free(in); free(out);
 return( ret == Z_STREAM_END ? Z_OK : Z_DATA_ERROR );
 }
-#endif /* _NO_LIBPNG */
 
 static void pdf_rlefilter(FILE *to,FILE *from) {
     int ch1, ch2, i;
@@ -885,7 +886,7 @@ return( NULL );
     while ( (ch=getc(pdf))!=EOF && ch!='m' );	/* Skip over >>\nstream */
     if ( (ch=getc(pdf))=='\r' ) ch = getc(pdf);	/* Skip the newline */
 
-    res = tmpfile();
+    res = GFileTmpfile();
     for ( i=0; i<length; ++i ) {
 	if ( (ch=getc(pdf))!=EOF )
 	    putc(ch,res);
@@ -900,14 +901,14 @@ return( res );
 	for ( end=pt; isalnum(*end); ++end );
 	ch = *end; *end = '\0';
 	old = res;
-	res = tmpfile();
+	res = GFileTmpfile();
 	if ( strmatch("ASCIIHexDecode",pt)==0 ) {
 	    pdf_hexfilter(res,old);
 	    pt += strlen("ASCIIHexDecode");
 	} else if ( strmatch("ASCII85Decode",pt)==0 ) {
 	    pdf_85filter(res,old);
 	    pt += strlen("ASCII85Decode");
-	} else if ( strmatch("FlateDecode",pt)==0 && haszlib()) {
+	} else if ( strmatch("FlateDecode",pt)==0) {
             if ( ptDecodeParms!=NULL ) {
 	        LogError( _("Unsupported decode filter parameters : %s"), ptDecodeParms );
 	        fclose(old); fclose(res);
@@ -1198,7 +1199,7 @@ return( pt_number );
 	    }
 	} else {
 	    *val = strtod(tokbuf,&end);
-	    if ( !finite(*val) ) {
+	    if ( !isfinite(*val) ) {
 /* GT: NaN is a concept in IEEE floating point which means "Not a Number" */
 /* GT: it is used to represent errors like 0/0 or sqrt(-1). */
 		LogError( _("Bad number, infinity or nan: %s\n"), tokbuf );
@@ -1229,6 +1230,7 @@ static Entity *EntityCreate(SplinePointList *head,int linecap,int linejoin,
     ent->u.splines.cap = linecap;
     ent->u.splines.join = linejoin;
     ent->u.splines.stroke_width = linewidth;
+    ent->u.splines.miterlimit = 10.0; // PostScript Spec Default
     ent->u.splines.fill.col = 0xffffffff;
     ent->u.splines.stroke.col = 0xffffffff;
     ent->u.splines.fill.opacity = 1.0;
@@ -1632,7 +1634,7 @@ return( NULL );
     _InterpretPdf(glyph_stream,pc,&ec);
     sc->width = ec.width;
     sc->layer_cnt = 1;
-    SCAppendEntityLayers(sc,ec.splines);
+    SCAppendEntityLayers(sc,ec.splines,ImportParamsState());
     if ( sc->layer_cnt==1 ) ++sc->layer_cnt;
 
     fclose(glyph_stream);
@@ -1750,6 +1752,8 @@ static void pdf_getcmap(struct pdfcontext *pc, SplineFont *basesf, int font_num)
     FILE *file;
     int i, j, gid, start, end, uni, cur=0, nuni, nhex, nchars, lo, *uvals;
     long *mappings = NULL;
+    long *tmappings = NULL;
+    long tmap;
     char tok[200], *ccval, prevtok[200]="";
     SplineFont *sf = basesf->subfontcnt > 0 ? basesf->subfonts[0] : basesf;
 
@@ -1760,13 +1764,13 @@ return;
 return;
     rewind(file);
 
-    mappings = calloc(sf->glyphcnt,sizeof(long));
+    long mappings_length = sf->glyphcnt;
+    mappings = calloc(mappings_length,sizeof(long));
     while ( pdf_getprotectedtok(file,tok) >= 0 ) {
 	if ( strcmp(tok,"beginbfchar") == 0 && sscanf(prevtok,"%d",&nchars)) {
 	    for (i=0; i<nchars; i++) {
 		if (pdf_skip_brackets(file,tok) >= 0 && sscanf(tok,"%x",&gid) &&
-		    pdf_skip_brackets(file,tok) >= 0 && sscanf(tok,"%lx",&mappings[cur])) {
-
+		    pdf_skip_brackets(file,tok) >= 0 && sscanf(tok,"%lx",&tmap)) {
 		    /* Values we store in the 'mappings' array are just unique identifiers, */
 		    /* so they should not necessarily correspond to any valid Unicode codepoints. */
 		    /* In order to get the real Unicode value mapped to a glyph we should parse the */
@@ -1788,7 +1792,22 @@ return;
 			    uvals[nuni++] = lo;
 			ccval += 4;
 		    }
-		    add_mapping(basesf, mappings, uvals, nuni, gid, pc->cmap_from_cid[font_num], cur);
+		    if (cur >= mappings_length && mappings_length <= 0x10000) {
+			// The limit is arbitrary.
+			// But a file exceeding it is probably garbage.
+			// If appropriate, double the size of the mapping table.
+			tmappings = calloc(2 * mappings_length,sizeof(long));
+			if (tmappings == NULL) goto fail;
+			memcpy(tmappings, mappings, mappings_length);
+			mappings_length *= 2;
+			free(mappings);
+			mappings = tmappings;
+		    }
+		    if (cur < mappings_length) {
+		        mappings[cur] = tmap;
+		        add_mapping(basesf, mappings, uvals, nuni, gid, pc->cmap_from_cid[font_num], cur);
+		        cur++;
+		    }
 		    free(uvals);
 		    cur++;
 		} else
@@ -1851,7 +1870,7 @@ static int pdf_getcharprocs(struct pdfcontext *pc,char *charprocs) {
 return( false );
 return( pdf_readdict(pc));
     }
-    temp = tmpfile();
+    temp = GFileTmpfile();
     if ( temp==NULL )
 return( false );
     while ( *charprocs ) {
@@ -1968,6 +1987,8 @@ return( NULL );
     ff = strtol(pt,NULL,10);
     if ( !pdf_findobject(pc,ff) || !pdf_readdict(pc) )
   goto fail;
+    if ( type==3 && (pt=PSDictHasEntry(&pc->pdfdict, "Subtype"))!=NULL && strcmp(pt, "/OpenType")==0 )
+	type = 2;
     file = pdf_defilterstream(pc);
     if ( file==NULL )
 return( NULL );
@@ -1981,7 +2002,7 @@ return( NULL );
 	sf = SplineFontFromPSFont(fd);
 	PSFontFree(fd);
     } else if ( type==2 ) {
-	sf = _SFReadTTF(file,0,pc->openflags,pc->fontnames[font_num],NULL);
+	sf = _SFReadTTF(file,0,pc->openflags,pc->fontnames[font_num],NULL,NULL);
     } else {
 	int len;
 	fseek(file,0,SEEK_END);
@@ -1990,6 +2011,8 @@ return( NULL );
 	sf = _CFFParse(file,len,pc->fontnames[font_num]);
     }
     fclose(file);
+    if (sf == NULL)
+	goto fail;
     /* Don't attempt to parse CMaps for Type 1 fonts: they already have glyph names */
     /* which are usually more meaningful */
     if (pc->cmapobjs[font_num] != -1 && type > 1)
@@ -2053,6 +2076,7 @@ char **NamesReadPDF(char *filename) {
 /* if errors, then free memory, close files, and return a NULL */
 NamesReadPDFlist_error:
     while ( --i>=0 ) free(list[i]);
+    free(list);
 NamesReadPDF_error:
     pcFree(&pc);
     fclose(pc.pdf);

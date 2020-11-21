@@ -24,8 +24,14 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
-#include "collabclientui.h"
+#include "spiro.h"
+#include "splineutil.h"
+
 #include <math.h>
 
 #if defined(KNIFE_CONTINUOUS)	/* Use this code to do cuts as we move along. Probably a bad idea, let's wait till the end */
@@ -303,7 +309,8 @@ void CVMouseUpKnife(CharView *cv, GEvent *event)
 	    spl->ticked = false;
 	}
 	CVCharChangedUpdate(   &cv->b );
-	collabclient_sendRedo( &cv->b );
+    } else {
+        GDrawRequestExpose(cv->v, NULL, false);
     }
 #endif
 }

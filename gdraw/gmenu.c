@@ -24,16 +24,18 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdlib.h>
-#include <gdraw.h>
+
+#include <fontforge-config.h>
+
+#include "gdraw.h"
 #include "ggadgetP.h"
-#include <gwidget.h>
-#include <ustring.h>
-#include <gkeysym.h>
-#include <utype.h>
-#include <gresource.h>
+#include "gkeysym.h"
+#include "gresource.h"
+#include "gwidget.h"
 #include "hotkeys.h"
-#include "gutils/prefs.h"
+#include "prefs.h"
+#include "ustring.h"
+#include "utype.h"
 
 static GBox menubar_box = GBOX_EMPTY; /* Don't initialize here */
 static GBox menu_box = GBOX_EMPTY; /* Don't initialize here */
@@ -139,6 +141,7 @@ static void GMenuInit() {
 	else if ( strmatch(keystr,"ibm")==0 || strmatch(keystr,"pc")==0 ) keyboard = kb_ibm;
 	else if ( strtol(keystr,&end,10), *end=='\0' )
 	    keyboard = strtol(keystr,NULL,10);
+        free(keystr);
     }
     menu_grabs = GResourceFindBool("GMenu.Grab",menu_grabs);
     mac_menu_icons = GResourceFindBool("GMenu.MacIcons",mac_menu_icons);
@@ -388,8 +391,10 @@ static char* GMenuGetMenuPath( GMenuItem *basemi, GMenuItem *targetmi ) {
 	    strcat(buffer,".");
 	if( stack[i]->ti.text_untranslated )
 	{
+            char* tmp = HKTextInfoToUntranslatedTextFromTextInfo( &stack[i]->ti );
 //	    TRACE("adding %s\n", HKTextInfoToUntranslatedTextFromTextInfo( &stack[i]->ti ));
-	    strcat( buffer, HKTextInfoToUntranslatedTextFromTextInfo( &stack[i]->ti ));
+            strcat( buffer, tmp);
+            free(tmp);
 	}
 	else if( stack[i]->ti.text )
 	{
@@ -1067,8 +1072,11 @@ static int HKActionMatchesFirstPartOf( char* action, char* prefix_const, int mun
     char prefix[PATH_MAX+1];
     char* pt = 0;
     strncpy( prefix, prefix_const, PATH_MAX );
-    if( munge )
-	strncpy( prefix, HKTextInfoToUntranslatedText( prefix_const ),PATH_MAX );
+    if( munge ) {
+	char *tofree = HKTextInfoToUntranslatedText(prefix_const);
+	strncpy( prefix, tofree,PATH_MAX );
+	free(tofree);
+    }
 //    TRACE("munge:%d prefix2:%s\n", munge, prefix );
 
     pt = strchr(action,'.');
@@ -1309,6 +1317,9 @@ static int gmenu_key(struct gmenu *m, GEvent *event) {
     GMenuItem *mi;
     GMenu *top;
     unichar_t keysym = event->u.chr.keysym;
+
+    if ( m->dying )
+	return( false );
 
     if ( islower(keysym)) keysym = toupper(keysym);
     if ( event->u.chr.state&ksm_meta && !(event->u.chr.state&(menumask&~(ksm_meta|ksm_shift)))) {
@@ -1853,64 +1864,16 @@ static int osx_handle_keysyms( int st, int k )
 int osx_fontview_copy_cut_counter = 0;
 
 
-
-
-int GMenuBarCheckKey(GWindow top, GGadget *g, GEvent *event) {
-    int i;
-    GMenuBar *mb = (GMenuBar *) g;
-    GMenuItem *mi;
-    unichar_t keysym = event->u.chr.keysym;
-
+static int GMenuBarCheckHotkey(GWindow top, GGadget *g, GEvent *event) {
 //    TRACE("GMenuBarCheckKey(top) keysym:%d upper:%d lower:%d\n",keysym,toupper(keysym),tolower(keysym));
-
-    int SkipUnQualifiedHotkeyProcessing = 0;
-    // see if we should skip processing
-    if( g )
-    {
+    // see if we should skip processing (e.g. no modifier key pressed)
+    GMenuBar *mb = (GMenuBar *) g;
 	GWindow w = GGadgetGetWindow(g);
 	GGadget* focus = GWindowGetFocusGadgetOfWindow(w);
-	if( GGadgetGetSkipHotkeyProcessing(focus))
+	if (GGadgetGetSkipHotkeyProcessing(focus))
 	    return 0;
-	SkipUnQualifiedHotkeyProcessing = GGadgetGetSkipUnQualifiedHotkeyProcessing(focus);
-    }
 
-
-    if ( g==NULL || keysym==0 ) return( false ); /* exit if no gadget or key */
-
-    if ( (menumask&ksm_cmdmacosx) && keysym>0x7f &&
-	    (event->u.chr.state&ksm_meta) &&
-	    !(event->u.chr.state&menumask&(ksm_control|ksm_cmdmacosx)) )
-	keysym = GGadgetUndoMacEnglishOptionCombinations(event);
-
-    if ( keysym<GK_Special && islower(keysym))
-	keysym = toupper(keysym);
-    if ( event->u.chr.state&ksm_meta && !(event->u.chr.state&(menumask&~(ksm_meta|ksm_shift)))) {
-	/* Only look for mneumonics in the leaf of the displayed menu structure */
-	if ( mb->child!=NULL )
-	    return( gmenu_key(mb->child,event)); /* this routine will do shortcuts too */
-
-	for ( i=0; i<mb->mtot; ++i ) {
-	    if ( mb->mi[i].ti.mnemonic == keysym && !mb->mi[i].ti.disabled ) {
-		GMenuBarKeyInvoke(mb,i);
-		return( true );
-	    }
-	}
-    }
 //    TRACE("GMenuBarCheckKey(2) keysym:%d upper:%d lower:%d\n",keysym,toupper(keysym),tolower(keysym));
-
-    /* First check for an open menu underscore key being pressed */
-    mi = GMenuSearchShortcut(mb->g.base,mb->mi,event,mb->child==NULL);
-    if ( mi ) {
-//	TRACE("GMenuBarCheckKey(3) have mi... :%p\n", mi );
-//	TRACE("GMenuBarCheckKey(3) have mitext:%s\n", u_to_c(mi->ti.text) );
-	if ( mi->ti.checkable && !mi->ti.disabled )
-	    mi->ti.checked = !mi->ti.checked;
-	if ( mi->invoke!=NULL && !mi->ti.disabled )
-	    (mi->invoke)(mb->g.base,mi,NULL);
-	if ( mb->child != NULL )
-	    GMenuDestroy(mb->child);
-	return( true );
-    }
 
     /* then look for hotkeys everywhere */
 
@@ -1967,7 +1930,7 @@ int GMenuBarCheckKey(GWindow top, GGadget *g, GEvent *event) {
 //    TRACE("     has ksm_meta:%d\n",    (event->u.chr.state & ksm_meta ));
 //    TRACE("     has ksm_shift:%d\n",   (event->u.chr.state & ksm_shift ));
 
-    if( SkipUnQualifiedHotkeyProcessing && !event->u.chr.state )
+    if( GGadgetGetSkipUnQualifiedHotkeyProcessing(focus) && !event->u.chr.state )
     {
 	TRACE("skipping unqualified hotkey for widget g:%p\n", g);
 	return 0;
@@ -1992,7 +1955,7 @@ int GMenuBarCheckKey(GWindow top, GGadget *g, GEvent *event) {
 
 	if( !skipkey )
 	{
-	    mi = GMenuSearchAction(mb->g.base,mb->mi,hk->action,event,mb->child==NULL);
+	    GMenuItem *mi = GMenuSearchAction(mb->g.base,mb->mi,hk->action,event,mb->child==NULL);
 	    if ( mi )
 	    {
 //		TRACE("GMenuBarCheckKey(x) have mi... :%p\n", mi );
@@ -2017,6 +1980,41 @@ int GMenuBarCheckKey(GWindow top, GGadget *g, GEvent *event) {
     dlist_free_external(&hklist);
 
 //    TRACE("menubarcheckkey(e1)\n");
+    return false;
+}
+
+
+int GMenuBarCheckKey(GWindow top, GGadget *g, GEvent *event) {
+    int i;
+    GMenuBar *mb = (GMenuBar *) g;
+    unichar_t keysym = event->u.chr.keysym;
+
+    if ( g==NULL || keysym==0 ) return( false ); /* exit if no gadget or key */
+
+    if ( (menumask&ksm_cmdmacosx) && keysym>0x7f &&
+	    (event->u.chr.state&ksm_meta) &&
+	    !(event->u.chr.state&menumask&(ksm_control|ksm_cmdmacosx)) )
+	keysym = GGadgetUndoMacEnglishOptionCombinations(event);
+
+    if ( keysym<GK_Special && islower(keysym))
+	keysym = toupper(keysym);
+    if ( event->u.chr.state&ksm_meta && !(event->u.chr.state&(menumask&~(ksm_meta|ksm_shift)))) {
+	/* Only look for mneumonics in the leaf of the displayed menu structure */
+	if ( mb->child!=NULL )
+	    return( gmenu_key(mb->child,event)); /* this routine will do shortcuts too */
+
+	for ( i=0; i<mb->mtot; ++i ) {
+	    if ( mb->mi[i].ti.mnemonic == keysym && !mb->mi[i].ti.disabled ) {
+		GMenuBarKeyInvoke(mb,i);
+		return( true );
+	    }
+	}
+    }
+
+    // See if it matches a hotkey
+    if (GMenuBarCheckHotkey(top, g, event)) {
+        return true;
+    }
 
     if ( mb->child )
     {
@@ -2028,7 +2026,7 @@ int GMenuBarCheckKey(GWindow top, GGadget *g, GEvent *event) {
     }
 
 //    TRACE("menubarcheckkey(e2)\n");
-    if ( event->u.chr.keysym==GK_Menu )
+    if ( event->u.chr.keysym==GK_Menu && most_recent_popup_menu==NULL )
 	GMenuCreatePopupMenu(event->w,event, mb->mi);
 
     return( false );

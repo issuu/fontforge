@@ -24,8 +24,9 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _NAMEHASH_H
-# define _NAMEHASH_H
+
+#ifndef FONTFORGE_NAMEHASH_H
+#define FONTFORGE_NAMEHASH_H
 
 #define GN_HSIZE	257
 
@@ -43,8 +44,8 @@ struct glyphnamehash {
 # define __inline__
 #endif
 
-static __inline__ int hashname(const char *pt) {
-    int val = 0;
+static __inline__ unsigned int hashname(const char *pt) {
+    unsigned int val = 0;
 
     while ( *pt ) {
 	val = (val<<3)|((val>>29)&0x7);
@@ -57,5 +58,4 @@ static __inline__ int hashname(const char *pt) {
 return( val );
 }
 
-extern void __GlyphHashFree(struct glyphnamehash *hash);
-#endif
+#endif /* FONTFORGE_NAMEHASH_H */

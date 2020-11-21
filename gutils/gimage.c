@@ -24,7 +24,10 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "inc/basics.h"
+
+#include <fontforge-config.h>
+
+#include "basics.h"
 #include "gimage.h"
 
 GImage *GImageCreate(enum image_type type, int32 width, int32 height) {
@@ -183,13 +186,17 @@ GImage *GImageAddImageBefore(GImage *dest, GImage *src, int pos) {
     }
     j = i;
     if ( src->list_len==0 ) {
-	if ( src->u.image->image_type!=it )
+	if ( src->u.image->image_type!=it ) {
+            free(imgs);
 return( NULL );
+}
 	imgs[j++] = src->u.image;
     } else {
 	for ( ; j<i+src->list_len; ++j ) {
-	    if ( src->u.images[j-i]->image_type!=it )
+	    if ( src->u.images[j-i]->image_type!=it ) {
+                free(imgs);
 return( NULL );
+}
 	    imgs[j] = src->u.images[j-i];
 	}
 	free(src->u.images);
@@ -376,36 +383,4 @@ return( pixel==base->trans?(val&0xffffff):(val|0xff000000) );
 Color GImageGetPixelRGBA(GImage *image,int x, int y) {
     struct _GImage *base = image->list_len==0?image->u.image:image->u.images[0];
 return( _GImageGetPixelRGBA(base,x,y));
-}
-
-/* This routine is now obsolete. I include it for compatability. See GImageGetPixelRGBA */
-Color _GImageGetPixelColor(struct _GImage *base,int x, int y) {
-    Color val;
-
-    if ( base->image_type==it_rgba ) {
-	val = ((uint32*) (base->data + y*base->bytes_per_line))[x] ;
-return( val==base->trans?~val:val );
-    } else if ( base->image_type==it_true ) {
-	val = ((uint32*) (base->data + y*base->bytes_per_line))[x] ;
-return( val==base->trans?~val:val );
-    } else if ( base->image_type==it_index ) {
-	uint8 pixel = ((uint8*) (base->data + y*base->bytes_per_line))[x];
-	val = base->clut->clut[pixel];
-return( pixel==base->trans?~val:val );
-    } else {
-	uint8 pixel = (((uint8*) (base->data + y*base->bytes_per_line))[x>>3]&(1<<(7-(x&7))) )?1:0;
-	if ( base->clut==NULL ) {
-	    if ( pixel )
-		val = COLOR_CREATE(0xff,0xff,0xff);
-	    else
-		val = COLOR_CREATE(0,0,0);
-	} else
-	    val = base->clut->clut[pixel];
-return( pixel==base->trans?~val:val );
-    }
-}
-
-Color GImageGetPixelColor(GImage *image,int x, int y) {
-    struct _GImage *base = image->list_len==0?image->u.image:image->u.images[0];
-return( _GImageGetPixelColor(base,x,y));
 }

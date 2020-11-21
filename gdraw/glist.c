@@ -24,12 +24,14 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
-#include "gkeysym.h"
 #include "ggadgetP.h"
+#include "gkeysym.h"
 #include "gwidget.h"
 #include "ustring.h"
-#include "gwidget.h"
 
 static int GListTypeTime = 500;			/* half a second between keystrokes */
 static int GListScrollTime = 500;		/* half a second between scrolls when mouse out of listbox */
@@ -1056,6 +1058,9 @@ return( &gl->g );
 
 static int popup_eh(GWindow popup,GEvent *event) {
     GGadget *owner = GDrawGetUserData(popup);
+    if (owner == NULL) {
+        return true;
+    }
 
     if ( event->type == et_controlevent ) {
 	GList *gl = (GList *) (event->u.control.g);
@@ -1070,6 +1075,7 @@ static int popup_eh(GWindow popup,GEvent *event) {
     } else if ( event->type == et_close ) {
 	GGadget *g = GWindowGetFocusGadgetOfWindow(popup);
 	void (*inform)(GGadget *,int) = (void (*) (GGadget *,int)) GGadgetGetUserData(g);
+	GDrawSetUserData(popup, NULL);
 	GDrawDestroyWindow(popup);
 	_GWidget_ClearPopupOwner(owner);
 	_GWidget_ClearGrabGadget(owner);

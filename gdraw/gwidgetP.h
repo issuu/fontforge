@@ -24,6 +24,10 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef FONTFORGE_GWIDGET_P_H
+#define FONTFORGE_GWIDGET_P_H
+
 #include "gwidget.h"
 
 struct wfuncs {
@@ -64,6 +68,8 @@ typedef struct gwidgetcontainerdata /* : GWidgetD */{
     unsigned int ispalette: 1;			/* only for top level widgets */
     unsigned int positioned_yet: 1;		/* only for top level palettes*/
     unsigned int isdocked: 1;			/* only for top level palettes*/
+    unsigned int isnestedkey: 1;		/* is this a nested key event*/
+    unsigned int programmove: 10;
     /* ******************* */
     struct ggadget *gadgets;
     struct gwidgetdata *widgets;		/* children */
@@ -88,6 +94,7 @@ typedef struct gtopleveldata /* : GContainerD */{
     unsigned int ispalette: 1;
     unsigned int positioned_yet: 1;		/* only for top level palettes*/
     unsigned int isdocked: 1;			/* only for top level palettes*/
+    unsigned int isnestedkey: 1;		/* is this a nested key event*/
     unsigned int programmove: 10;
     struct ggadget *gadgets;
     struct gwidgetdata *widgets;		/* children */
@@ -99,7 +106,6 @@ typedef struct gtopleveldata /* : GContainerD */{
 		/*  current popup. It needs all events until popup vanishes */
     struct ggadget *gdef, *gcancel, *gmenubar;
     struct ggadget *gfocus;
-    GWindow wfocus;
     int (*handle_key)(GWindow top, GWindow ew, GEvent *);	/* All key events are handled by top level window */
     struct gtopleveldata *palettes, *nextp, *owner;
     int16 owner_off_x, owner_off_y;		/* Offset of palette from owner*/
@@ -108,3 +114,5 @@ typedef struct gtopleveldata /* : GContainerD */{
 GWidgetD *_GWidget_ChangeInternalFocus(GWidget gw,GWidgetD *to,struct ggadget *gto);
 void _GWidget_RestorePixmap(GWindow gw, GWindow ours, GRect *rect);
 GWindow _GWidget_GetPixmap(GWindow gw,GRect *rect);
+
+#endif /* FONTFORGE_GWIDGET_P_H */

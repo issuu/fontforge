@@ -24,14 +24,30 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "dumppfa.h"
+#include "encoding.h"
 #include "fontforgeui.h"
-#include <ustring.h>
-#include <math.h>
-#include <gkeysym.h>
-#include <locale.h>
-#include <utype.h>
-#include "ttf.h"
+#include "fvfonts.h"
+#include "gkeysym.h"
+#include "macenc.h"
+#include "mem.h"
 #include "mm.h"
+#include "parsettf.h"
+#include "psread.h"
+#include "sfd.h"
+#include "splinefill.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottfvar.h"
+#include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
+#include <math.h>
 
 /* As far as I can tell, the CDV in AdobeSansMM is half gibberish */
 /* This is disturbing */
@@ -509,7 +525,7 @@ static int mmcb_e_h(GWindow gw, GEvent *event) {
 	mmcb->done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("mmmenu.html");
+	    help("ui/menus/mmmenu.html", NULL);
 return( true );
 	}
 return( false );
@@ -966,7 +982,7 @@ static int esd_eh(GWindow gw, GEvent *event) {
 	ESD_Close(esd);
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("multiplemaster.html#NamedStyles");
+	    help("ui/dialogs/multiplemaster.html", "#multiplemaster-namedstyles");
 return( true );
 	} else if ( GMenuIsCommand(event,H_("Quit|Ctl+Q") )) {
 	    MenuExit(NULL,NULL,NULL);
@@ -1005,7 +1021,7 @@ static void EditStyleName(MMW *mmw,int index) {
 	    mn = ti->userdata;
 	}
 	if ( pt!=NULL ) {
-	    for ( i=0, ++pt; i<4 && (*pt!=']' || *pt!='\0'); ++i ) {
+	    for ( i=0, ++pt; i<4 && (*pt!=']' && *pt!='\0'); ++i ) {
 		axes[i] = u_strtod(pt,&end);
 		pt = end;
 	    }
@@ -2359,7 +2375,7 @@ static int MMW_CheckBrowse(GGadget *g, GEvent *e) {
 	unichar_t *ut;
 
 	if ( ti!=NULL && ti->userdata == (void *) -1 ) {
-	    temp = GetPostScriptFontName(NULL,false);
+	    temp = GetPostScriptFontName(NULL,false,true);
 	    if ( temp==NULL )
 return(true);
 	    sf = LoadSplineFont(temp,0);
@@ -2400,7 +2416,7 @@ return( true );
 static int mmwsub_e_h(GWindow gw, GEvent *event) {
     if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("multiplemaster.html");
+	    help("ui/dialogs/multiplemaster.html", NULL);
 return( true );
 	} else if ( event->u.chr.keysym=='q' && (event->u.chr.state&ksm_control)) {
 	    if ( event->u.chr.state&ksm_shift )
@@ -2421,7 +2437,7 @@ static int mmw_e_h(GWindow gw, GEvent *event) {
 	MMW_Close(mmw);
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("multiplemaster.html");
+	    help("ui/dialogs/multiplemaster.html", NULL);
 return( true );
 	} else if ( event->u.chr.keysym=='q' && (event->u.chr.state&ksm_control)) {
 	    if ( event->u.chr.state&ksm_shift )

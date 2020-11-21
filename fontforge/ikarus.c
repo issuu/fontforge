@@ -24,10 +24,21 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "ikarus.h"
+
 #include "fontforge.h"
-#include <utype.h>
+#include "mem.h"
+#include "namelist.h"
+#include "splineorder2.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <string.h>
-#include <ustring.h>
 
 /* Ikarus formats defined in Peter Karow's book "Digital formats for typefaces" */
 /*  URW Verlag, Hamburg, 1987. The IK format defined in Appendices G&I */
@@ -647,7 +658,7 @@ return( NULL );
     /* descender? = */ getushort(file);
     /* line thickness = */ getushort(file);
     /* stroke thickness = */ getushort(file);
-    italic_angle = getushort(file)/10.0 * 3.1415926535897932/180.0;
+    italic_angle = getushort(file)/10.0 * FF_PI/180.0;
     opt_pt_size = getushort(file);
     /* average char width = */ getushort(file);
 

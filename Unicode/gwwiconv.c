@@ -27,15 +27,16 @@
 
 #include <fontforge-config.h>
 
-#include <basics.h>
-#include <gwwiconv.h>
-#include <charset.h>
-#include <chardata.h>
-#include <string.h>
-#include <ustring.h>
-#include <stdio.h>
+#include "basics.h"
+#include "chardata.h"
+#include "charset.h"
+#include "gwwiconv.h"
+#include "ustring.h"
 
-#ifndef HAVE_ICONV
+#include <stdio.h>
+#include <string.h>
+
+#ifndef HAVE_ICONV_H
 
 /* I have written an limited iconv which will convert either to or from unichar_t */
 /* (either UCS2 or UCS4) */
@@ -93,6 +94,7 @@ static enum encoding name_to_enc(const char *encname) {
 	{ "iso8859-13", e_iso8859_13 },
 	{ "iso8859-14", e_iso8859_14 },
 	{ "iso8859-15", e_iso8859_15 },
+	{ "iso8859-16", e_iso8859_16 },
 	{ "iso-8859-1", e_iso8859_1 },
 	{ "iso-8859-2", e_iso8859_2 },
 	{ "iso-8859-3", e_iso8859_3 },
@@ -107,6 +109,7 @@ static enum encoding name_to_enc(const char *encname) {
 	{ "iso-8859-13", e_iso8859_13 },
 	{ "iso-8859-14", e_iso8859_14 },
 	{ "iso-8859-15", e_iso8859_15 },
+	{ "iso-8859-16", e_iso8859_16 },
 	{ "koi8-r", e_koi8_r },
 	{ "jis201", e_jis201 },
 	{ "mac", e_mac },
@@ -1061,4 +1064,4 @@ return( char_cnt );
 }
 #else
 static const int a_file_must_define_something=1;
-#endif 	/* HAVE_ICONV */
+#endif 	/* HAVE_ICONV_H */

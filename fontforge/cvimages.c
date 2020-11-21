@@ -24,15 +24,56 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvimages.h"
+
+#include "cvundoes.h"
 #include "fontforgevw.h"
+#include "fvfonts.h"
+#include "parsepdf.h"
+#include "psread.h"
+#include "sd.h"
+#include "spiro.h"
+#include "splinefit.h"
+#include "splineorder2.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "svg.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <assert.h>
+#include <dirent.h>
 #include <math.h>
 #include <sys/types.h>
-#include <dirent.h>
-#include "sd.h"
-#include <ustring.h>
-#include <utype.h>
 
-void SCAppendEntityLayers(SplineChar *sc, Entity *ent) {
+void InitImportParams(ImportParams *ip) {
+    assert( ip!=NULL );
+
+    memset(ip, 0, sizeof(ImportParams));
+
+    ip->initialized = true;
+
+    ip->correct_direction = true;
+    ip->simplify = true;
+    ip->clip = true;
+    ip->scale = true;
+    ip->accuracy_target = 0.25;
+    ip->default_joinlimit = JLIMIT_INHERITED;
+}
+
+ImportParams *ImportParamsState() {
+    static ImportParams ips;
+
+    if ( !ips.initialized )
+	InitImportParams(&ips);
+
+    return &ips;
+}
+
+void SCAppendEntityLayers(SplineChar *sc, Entity *ent, ImportParams *ip) {
     int cnt, pos;
     Entity *e, *enext;
     Layer *old = sc->layers;
@@ -99,7 +140,8 @@ return;
     SCMoreLayers(sc,old);
 }
 
-void SCImportPSFile(SplineChar *sc,int layer,FILE *ps,int doclear,int flags) {
+void SCImportPSFile(SplineChar *sc,int layer,FILE *ps,bool doclear,
+                    ImportParams *ip) {
     SplinePointList *spl, *espl;
     SplineSet **head;
     int empty, width;
@@ -109,9 +151,9 @@ return;
     width = UNDEFINED_WIDTH;
     empty = sc->layers[layer].splines==NULL && sc->layers[layer].refs==NULL;
     if ( sc->parent->multilayer && layer>ly_back ) {
-	SCAppendEntityLayers(sc, EntityInterpretPS(ps,&width));
+	SCAppendEntityLayers(sc, EntityInterpretPS(ps,&width), ip);
     } else {
-	spl = SplinePointListInterpretPS(ps,flags,sc->parent->strokedfont,&width);
+	spl = SplinePointListInterpretPS(ps,ip,sc->parent->strokedfont,&width);
 	if ( spl==NULL ) {
 	    ff_post_error( _("Too Complex or Bad"), _("I'm sorry this file is too complex for me to understand (or is erroneous, or is empty)") );
 return;
@@ -137,26 +179,32 @@ return;
     SCCharChangedUpdate(sc,layer);
 }
 
-void SCImportPS(SplineChar *sc,int layer,char *path,int doclear, int flags) {
+void SCImportPS(SplineChar *sc,int layer,char *path,bool doclear,
+                ImportParams *ip) {
     FILE *ps = fopen(path,"r");
 
     if ( ps==NULL )
 return;
-    SCImportPSFile(sc,layer,ps,doclear,flags);
+    SCImportPSFile(sc,layer,ps,doclear,ip);
     fclose(ps);
 }
 
-void SCImportPDFFile(SplineChar *sc,int layer,FILE *pdf,int doclear,int flags) {
+void SCImportPDFFile(SplineChar *sc,int layer,FILE *pdf,bool doclear,
+                     ImportParams *ip) {
     SplinePointList *spl, *espl;
     SplineSet **head;
+    bigreal tmpjl = ip->default_joinlimit;
 
     if ( pdf==NULL )
 return;
 
     if ( sc->parent->multilayer && layer>ly_back ) {
-	SCAppendEntityLayers(sc, EntityInterpretPDFPage(pdf,-1));
+	SCAppendEntityLayers(sc, EntityInterpretPDFPage(pdf,-1), ip);
     } else {
-	spl = SplinesFromEntities(EntityInterpretPDFPage(pdf,-1),&flags,sc->parent->strokedfont);
+	if ( tmpjl==JLIMIT_INHERITED )
+	    ip->default_joinlimit = 10.0; // PostScript default
+	spl = SplinesFromEntities(EntityInterpretPDFPage(pdf,-1),ip,sc->parent->strokedfont);
+	ip->default_joinlimit = tmpjl;
 	if ( spl==NULL ) {
 	    ff_post_error( _("Too Complex or Bad"), _("I'm sorry this file is too complex for me to understand (or is erroneous, or is empty)") );
 return;
@@ -180,16 +228,18 @@ return;
     SCCharChangedUpdate(sc,layer);
 }
 
-void SCImportPDF(SplineChar *sc,int layer,char *path,int doclear, int flags) {
+void SCImportPDF(SplineChar *sc,int layer,char *path,bool doclear,
+                 ImportParams *ip) {
     FILE *pdf = fopen(path,"r");
 
     if ( pdf==NULL )
 return;
-    SCImportPDFFile(sc,layer,pdf,doclear,flags);
+    SCImportPDFFile(sc,layer,pdf,doclear,ip);
     fclose(pdf);
 }
 
-void SCImportPlateFile(SplineChar *sc,int layer,FILE *plate,int doclear) {
+void SCImportPlateFile(SplineChar *sc,int layer,FILE *plate,bool doclear,
+                       ImportParams *ip) {
     SplineSet **ly_head, *head, *cur, *last;
     spiro_cp *spiros=NULL;
     int cnt=0, max=0, ch;
@@ -211,11 +261,13 @@ return;
     break;
 	if ( ch!='(' ) {
 	    ff_post_error( _("Not a plate file"), _("This does not seem to be a plate file\nExpected left paren"));
+            free(spiros);
 return;
 	}
 	ch = getc(plate);
 	if ( ch!='v' && ch!='o' && ch!='c' && ch!='[' && ch!=']' && ch!='z' ) {
 	    ff_post_error( _("Not a plate file"), _("This does not seem to be a plate file\nExpected one of 'voc[]z'"));
+            free(spiros);
 return;
 	}
 	if ( cnt>=max )
@@ -239,6 +291,7 @@ return;
 	} else {
 	    if ( fscanf(plate,"%lg %lg )", &spiros[cnt].x, &spiros[cnt].y)!=2 ) {
 		ff_post_error( _("Not a plate file"), _("This does not seem to be a plate file\nExpected two real numbers"));
+                free(spiros);
 return;
 	    }
 	    ++cnt;
@@ -293,15 +346,20 @@ return;
     SCCharChangedUpdate(sc,layer);
 }
 
-void SCImportSVG(SplineChar *sc,int layer,char *path,char *memory, int memlen, int doclear) {
+void SCImportSVG(SplineChar *sc,int layer,char *path,char *memory, int memlen,
+                 bool doclear, ImportParams *ip) {
     SplinePointList *spl, *espl, **head;
 
     if ( sc->parent->multilayer && layer>ly_back ) {
-	SCAppendEntityLayers(sc, EntityInterpretSVG(path,memory,memlen,sc->parent->ascent+sc->parent->descent,
-		sc->parent->ascent));
+	SCAppendEntityLayers(sc,
+	       EntityInterpretSVG(path,memory,memlen,
+	                          sc->parent->ascent+sc->parent->descent,
+	                          sc->parent->ascent,ip->scale), ip);
     } else {
-	spl = SplinePointListInterpretSVG(path,memory,memlen,sc->parent->ascent+sc->parent->descent,
-		sc->parent->ascent,sc->parent->strokedfont);
+	spl = SplinePointListInterpretSVG(path,memory,memlen,
+	                                  sc->parent->ascent+sc->parent->descent,
+	                                  sc->parent->ascent,
+	                                  sc->parent->strokedfont, ip);
 	for ( espl = spl; espl!=NULL && espl->first->next==NULL; espl=espl->next );
 	if ( espl!=NULL )
 	    if ( espl->first->next->order2!=sc->layers[layer].order2 )
@@ -327,11 +385,14 @@ return;
     SCCharChangedUpdate(sc,layer);
 }
 
-void SCImportGlif(SplineChar *sc,int layer,char *path,char *memory, int memlen, int doclear) {
+void SCImportGlif(SplineChar *sc,int layer,char *path,char *memory, int memlen,
+                  bool doclear, ImportParams *UNUSED(ip)) {
     SplinePointList *spl, *espl, **head;
 
-    spl = SplinePointListInterpretGlif(sc->parent,path,memory,memlen,sc->parent->ascent+sc->parent->descent,
-	    sc->parent->ascent,sc->parent->strokedfont);
+    spl = SplinePointListInterpretGlif(sc->parent,path,memory,memlen,
+                                       sc->parent->ascent+sc->parent->descent,
+                                       sc->parent->ascent,
+                                       sc->parent->strokedfont);
     for ( espl = spl; espl!=NULL && espl->first->next==NULL; espl=espl->next );
     if ( espl!=NULL )
 	if ( espl->first->next->order2!=sc->layers[layer].order2 )
@@ -399,7 +460,7 @@ static SplinePoint *ArcSpline(SplinePoint *sp,float sa,SplinePoint *ep,float ea,
     ss = sin(sa); sc = cos(sa); es = sin(ea); ec = cos(ea);
     if ( ep==NULL )
 	ep = SplinePointCreate((double)(cx+r)*ec, (double)(cy+r)*es);
-    len = ((double)(ea-sa)/(3.1415926535897932/2)) * (double)r * .552;
+    len = ((double)(ea-sa)/(FF_PI/2)) * (double)r * .552;
 
     sp->nextcp.x = sp->me.x - len*ss; sp->nextcp.y = sp->me.y + len*sc;
     ep->prevcp.x = ep->me.x + len*es; ep->prevcp.y = ep->me.y - len*ec;
@@ -438,23 +499,23 @@ static SplineSet * slurparc(FILE *fig,SplineChar *sc, SplineSet *sofar) {
     spl->last = ep = SplinePointCreate(ex,ey);
 
     if ( dir==0 ) {	/* clockwise */
-	if ( ea>sa ) ea = (double)ea - 2*3.1415926535897932;
-	ma=ceil((double)sa/(3.1415926535897932/2)-1)*(3.1415926535897932/2);
-	if ( RealNearish( sa,ma )) ma = (double)ma - (3.1415926535897932/2);
+	if ( ea>sa ) ea = (double)ea - 2*FF_PI;
+	ma=ceil((double)sa/(FF_PI/2)-1)*(FF_PI/2);
+	if ( RealNearish( sa,ma )) ma = (double)ma - (FF_PI/2);
 	while ( ma > ea ) {
 	    sp = ArcSpline(sp,sa,NULL,ma,cx,cy,r);
 	    sa = ma;
-	    ma = (double)ma - (3.1415926535897932/2);
+	    ma = (double)ma - (FF_PI/2);
 	}
 	sp = ArcSpline(sp,sa,ep,ea,cx,cy,r);
     } else {		/* counterclockwise */
-	if ( ea<sa ) ea = (double)ea + 2*3.1415926535897932;
-	ma=floor((double)sa/(3.1415926535897932/2)+1)*(3.1415926535897932/2);
-	if ( RealNearish( sa,ma )) ma = (double)ma + (3.1415926535897932/2);
+	if ( ea<sa ) ea = (double)ea + 2*FF_PI;
+	ma=floor((double)sa/(FF_PI/2)+1)*(FF_PI/2);
+	if ( RealNearish( sa,ma )) ma = (double)ma + (FF_PI/2);
 	while ( ma < ea ) {
 	    sp = ArcSpline(sp,sa,NULL,ma,cx,cy,r);
 	    sa = ma;
-	    ma = (double)ma + (3.1415926535897932/2);
+	    ma = (double)ma + (FF_PI/2);
 	}
 	sp = ArcSpline(sp,sa,ep,ea,cx,cy,r);
     }
@@ -675,18 +736,18 @@ static void xsplineeval(BasePoint *ret,real t, struct xspline *xs) {
     ret->y /= (A0+A1+A2+A3);
 }
 
-static void AdjustTs(TPoint *mids,SplinePoint *from, SplinePoint *to) {
+static void AdjustTs(FitPoint *mids,SplinePoint *from, SplinePoint *to) {
     real len=0, sofar;
     real lens[8];
     int i;
 
-    lens[0] = sqrt((mids[0].x-from->me.x)*(mids[0].x-from->me.x) +
-		    (mids[0].y-from->me.y)*(mids[0].y-from->me.y));
-    lens[7] = sqrt((mids[6].x-to->me.x)*(mids[6].x-to->me.x) +
-		    (mids[6].y-to->me.y)*(mids[6].y-to->me.y));
+    lens[0] = sqrt((mids[0].p.x-from->me.x)*(mids[0].p.x-from->me.x) +
+		    (mids[0].p.y-from->me.y)*(mids[0].p.y-from->me.y));
+    lens[7] = sqrt((mids[6].p.x-to->me.x)*(mids[6].p.x-to->me.x) +
+		    (mids[6].p.y-to->me.y)*(mids[6].p.y-to->me.y));
     for ( i=1; i<7; ++i )
-	lens[i] = sqrt((mids[i].x-mids[i-1].x)*(mids[i].x-mids[i-1].x) +
-			(mids[i].y-mids[i-1].y)*(mids[i].y-mids[i-1].y));
+	lens[i] = sqrt((mids[i].p.x-mids[i-1].p.x)*(mids[i].p.x-mids[i-1].p.x) +
+			(mids[i].p.y-mids[i-1].p.y)*(mids[i].p.y-mids[i-1].p.y));
     for ( len=0, i=0; i<8; ++i )
 	len += lens[i];
     for ( sofar=0, i=0; i<7; ++i ) {
@@ -698,7 +759,7 @@ static void AdjustTs(TPoint *mids,SplinePoint *from, SplinePoint *to) {
 static SplineSet *ApproximateXSpline(struct xspline *xs,int order2) {
     size_t i, j;
     real t;
-    TPoint mids[7];
+    FitPoint mids[7];
     SplineSet *spl = chunkalloc(sizeof(SplineSet));
     SplinePoint *sp;
 
@@ -714,7 +775,7 @@ static SplineSet *ApproximateXSpline(struct xspline *xs,int order2) {
 	    xsplineeval(&sp->me,i+1,xs);
 	}
 	for ( j=0, t=1./8; j<sizeof(mids)/sizeof(mids[0]); ++j, t+=1./8 ) {
-	    xsplineeval((BasePoint *) &mids[j],i+t,xs);
+	    xsplineeval((BasePoint *) &mids[j].p,i+t,xs);
 	    mids[j].t = t;
 	}
 	AdjustTs(mids,spl->last,sp);
@@ -810,7 +871,8 @@ return(sofar);
 return( sofar );
 }
 
-void SCImportFig(SplineChar *sc,int layer,char *path,int doclear) {
+void SCImportFig(SplineChar *sc,int layer,char *path,bool doclear,
+                 ImportParams *ip) {
     FILE *fig;
     char buffer[100];
     SplineSet *spl, *espl, **head;
@@ -923,11 +985,13 @@ void SCInsertImage(SplineChar *sc,GImage *image,real scale,real yoff,real xoff,
     SCCharChangedUpdate(sc,layer);
 }
 
-void SCAddScaleImage(SplineChar *sc,GImage *image,int doclear, int layer) {
-    double scale;
+void SCAddScaleImage(SplineChar *sc,GImage *image,bool doclear, int layer,
+                     ImportParams *ip) {
+    double scale = 1.0;
 
     image = ImageAlterClut(image);
-    scale = (sc->parent->ascent+sc->parent->descent)/(real) GImageGetHeight(image);
+    if ( ip->scale )
+	scale = (sc->parent->ascent+sc->parent->descent)/(real) GImageGetHeight(image);
     if ( doclear ) {
 	ImageListsFree(sc->layers[layer].images);
 	sc->layers[layer].images = NULL;
@@ -935,7 +999,8 @@ void SCAddScaleImage(SplineChar *sc,GImage *image,int doclear, int layer) {
     SCInsertImage(sc,image,scale,sc->parent->ascent,0,layer);
 }
 
-int FVImportImages(FontViewBase *fv,char *path,int format,int toback, int flags) {
+int FVImportImages(FontViewBase *fv,char *path,int format,int toback,
+                   bool preclear, ImportParams *ip) {
     GImage *image;
     /*struct _GImage *base;*/
     int tot;
@@ -955,22 +1020,22 @@ int FVImportImages(FontViewBase *fv,char *path,int format,int toback, int flags)
 return(false);
 	    }
 	    ++tot;
-	    SCAddScaleImage(sc,image,true,toback?ly_back:ly_fore);
+	    SCAddScaleImage(sc,image,true,toback?ly_back:ly_fore, ip);
 	} else if ( format==fv_svg ) {
-	    SCImportSVG(sc,toback?ly_back:fv->active_layer,start,NULL,0,flags&sf_clearbeforeinput);
+	    SCImportSVG(sc,toback?ly_back:fv->active_layer,start,NULL,0,preclear,ip);
 	    ++tot;
 	} else if ( format==fv_glif ) {
-	    SCImportGlif(sc,toback?ly_back:fv->active_layer,start,NULL,0,flags&sf_clearbeforeinput);
+	    SCImportGlif(sc,toback?ly_back:fv->active_layer,start,NULL,0,preclear,ip);
 	    ++tot;
 	} else if ( format==fv_eps ) {
-	    SCImportPS(sc,toback?ly_back:fv->active_layer,start,flags&sf_clearbeforeinput,flags&~sf_clearbeforeinput);
+	    SCImportPS(sc,toback?ly_back:fv->active_layer,start,preclear,ip);
 	    ++tot;
 	} else if ( format==fv_pdf ) {
-	    SCImportPDF(sc,toback?ly_back:fv->active_layer,start,flags&sf_clearbeforeinput,flags&~sf_clearbeforeinput);
+	    SCImportPDF(sc,toback?ly_back:fv->active_layer,start,preclear,ip);
 	    ++tot;
 #ifndef _NO_PYTHON
 	} else if ( format>=fv_pythonbase ) {
-	    PyFF_SCImport(sc,format-fv_pythonbase,start, toback?ly_back:fv->active_layer,flags&sf_clearbeforeinput);
+	    PyFF_SCImport(sc,format-fv_pythonbase,start, toback?ly_back:fv->active_layer,preclear);
 	    ++tot;
 #endif
 	}
@@ -985,7 +1050,8 @@ return(false);
 return( true );
 }
 
-int FVImportImageTemplate(FontViewBase *fv,char *path,int format,int toback, int flags) {
+int FVImportImageTemplate(FontViewBase *fv,char *path,int format,int toback,
+                          bool preclear, ImportParams *ip) {
     GImage *image;
     struct _GImage *base;
     int tot;
@@ -1023,7 +1089,7 @@ return( false );
 	    ff_post_error(_("Nothing Loaded"),_("Nothing Loaded"));
 return( false );
     }
-    
+
     tot = 0;
     while ( (entry=readdir(dir))!=NULL ) {
 	pt = strrchr(entry->d_name,'.');
@@ -1067,18 +1133,18 @@ return( false );
     continue;
 	    }
 	    ++tot;
-	    SCAddScaleImage(sc,image,true,toback?ly_back:ly_fore);
+	    SCAddScaleImage(sc,image,true,toback?ly_back:ly_fore,ip);
 	} else if ( format==fv_svgtemplate ) {
-	    SCImportSVG(sc,toback?ly_back:fv->active_layer,start,NULL,0,flags&sf_clearbeforeinput);
+	    SCImportSVG(sc,toback?ly_back:fv->active_layer,start,NULL,0,preclear,ip);
 	    ++tot;
 	} else if ( format==fv_gliftemplate ) {
-	    SCImportGlif(sc,toback?ly_back:fv->active_layer,start,NULL,0,flags&sf_clearbeforeinput);
+	    SCImportGlif(sc,toback?ly_back:fv->active_layer,start,NULL,0,preclear,ip);
 	    ++tot;
 	} else if ( format==fv_pdftemplate ) {
-	    SCImportPDF(sc,toback?ly_back:fv->active_layer,start,flags&sf_clearbeforeinput,flags&~sf_clearbeforeinput);
+	    SCImportPDF(sc,toback?ly_back:fv->active_layer,start,preclear,ip);
 	    ++tot;
 	} else {
-	    SCImportPS(sc,toback?ly_back:fv->active_layer,start,flags&sf_clearbeforeinput,flags&~sf_clearbeforeinput);
+	    SCImportPS(sc,toback?ly_back:fv->active_layer,start,preclear,ip);
 	    ++tot;
 	}
     }

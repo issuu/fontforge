@@ -24,12 +24,27 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "palmfonts.h"
+
+#include "bvedit.h"
+#include "encoding.h"
 #include "fontforgevw.h"
-#include <stdio.h>
-#include <math.h>
+#include "macbinary.h"
+#include "mem.h"
+#include "splinefill.h"
 #include "splinefont.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottf.h"
+#include "ustring.h"
+
+#include <math.h>
+#include <stdio.h>
 #include <string.h>
-#include <ustring.h>
 
 /* Palm bitmap fonts are a bastardized version of the mac 'FONT' resource
  (which is the same format as the newer but still obsolete 'NFNT' resource).
@@ -166,6 +181,7 @@ return;
 	    BCCompressBitmap(bdfc);
 	}
     }
+    free(fontImage);
 }
 
 static SplineFont *PalmTestFont(FILE *file,int end, char *family,const char *style) {
@@ -428,6 +444,7 @@ return( NULL );
 	putlong(file,0);
 	putlong(file,0);
     }
+free(fn);
 return(file);
 }
 

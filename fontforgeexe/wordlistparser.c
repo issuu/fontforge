@@ -26,17 +26,18 @@
 *******************************************************************************
 *******************************************************************************
 ******************************************************************************/
+
 #include <fontforge-config.h>
 
-#include <string.h>
-#include <ctype.h>
-
-#include "inc/ustring.h"
-#include "inc/ggadget.h"
-#include "inc/gwidget.h"
+#include "fvfonts.h"
+#include "ggadget.h"
+#include "gwidget.h"
 #include "uiinterface.h"
+#include "ustring.h"
 #include "wordlistparser.h"
 
+#include <ctype.h>
+#include <string.h>
 
 static void dump_ustr( char* msg, unichar_t* u )
 {
@@ -169,7 +170,7 @@ WordlistEscapedInputStringToRealString_readGlyphName(
 	    }
 	    if( !sc )
 	    {
-		printf("WordlistEscapedInputStringToRealString_readGlyphName() no char found for backslashed unicodepoint:%ld\n", unicodepoint );
+//		printf("WordlistEscapedInputStringToRealString_readGlyphName() no char found for backslashed unicodepoint:%ld\n", unicodepoint );
 		strcpy(glyphname,"backslash");
 		sc = SFGetChar( sf, -1, glyphname );
 		endpos = startpos;
@@ -276,7 +277,7 @@ u_WordlistEscapedInputStringToRealString_readGlyphName(
 	    }
 	    if( !sc )
 	    {
-		printf("WordlistEscapedInputStringToRealString_readGlyphName() no char found for backslashed unicodepoint:%ld\n", unicodepoint );
+//		printf("WordlistEscapedInputStringToRealString_readGlyphName() no char found for backslashed unicodepoint:%ld\n", unicodepoint );
 		uc_strcpy(glyphname,"backslash");
 		sc = SFGetChar( sf, -1, u_to_c(glyphname) );
 		endpos = startpos;
@@ -286,27 +287,46 @@ u_WordlistEscapedInputStringToRealString_readGlyphName(
 	{
 	    if( uc_startswith( glyphname, "uni"))
 	    {
-		unichar_t* endptr = 0;
+		unichar_t* endptr = 0, *tmp_gn;
+		int gn_len;
 		long unicodepoint = u_strtoul( glyphname+3, &endptr, 16 );
-                SplineChar* tmp = 0;
+		char c;
+		SplineChar* tmp = 0;
 		TRACE("uni prefix, codepoint: %ld\n", unicodepoint );
 		sc = SFGetChar( sf, unicodepoint, 0 );
-                if (tmp = SFGetChar( sf, -1, u_to_c(glyphname) )) {
-		    TRACE("have subst. char: %s\n", tmp->name );
-                    sc = tmp;
-                } else {
+
+		/* When text is added after a glyphname with a period (such as "uni1234.alt"
+		 * the other search heuristics will tend to interpret the period as a glyph
+		 * and split the string. Here we search for the glyphname trimming off 
+		 * characters at the end in order to find the glyph
+		 */
+		gn_len = u_strlen(glyphname);
+		tmp_gn = malloc((gn_len+1)*sizeof(unichar_t));
+		u_strncpy(tmp_gn, glyphname, gn_len);
+		for (int i = gn_len; i>0; i--) {
+		    tmp_gn[i] = 0;
+		    tmp = SFGetChar( sf, -1, u_to_c(tmp_gn) );
+		    TRACE("looking for subst. char: %s\n", u_to_c(tmp_gn));
+		    if (tmp != NULL) {
+			TRACE("have subst. char: %s\n", tmp->name ); break;
+		    }
+		}
+		free(tmp_gn);
+
+		if (tmp != NULL){
+		    sc = tmp;
+		} else {
 		    if( sc && endptr )
 		    {
 		        unichar_t* endofglyphname = glyphname + u_strlen(glyphname);
-//		        printf("endptr:%p endofglyphname:%p\n", endptr, endofglyphname );
-		        for( ; endptr < endofglyphname; endptr++ )
-                            --endpos;
+		        //printf("endptr:%p endofglyphname:%p\n", endptr, endofglyphname );
+		        for( ; endptr < endofglyphname; endptr++ ) --endpos;
 		    }
-                }
-	    }
-	    
-	    if( firstLookup && glyphname[0] == '#' )
-	    {
+		}
+		}
+
+		if( firstLookup && glyphname[0] == '#' )
+		{
 		unichar_t* endptr = 0;
 		long unicodepoint = u_strtoul( glyphname+1, &endptr, 16 );
 //		printf("WordlistEscapedInputStringToRealString_readGlyphName() unicodepoint:%ld\n", unicodepoint );
@@ -381,8 +401,6 @@ void WordlistTrimTrailingSingleSlash( unichar_t* txt )
 /************************************************************/
 /************************************************************/
 
-static int WordListLineSz = 1024;
-
 int WordListLine_countSelected( WordListLine wll )
 {
     int ret = 0;
@@ -416,10 +434,11 @@ WordListLine WordlistEscapedInputStringToParsedDataComplex(
     void* udata )
 {
     unichar_t* input = u_copy( input_const );
-    WordListChar* ret = calloc( WordListLineSz, sizeof(WordListChar));
+    int input_len = u_strlen(input);
+    WordListChar* ret = calloc( input_len+1, sizeof(WordListChar));
     WordListChar* out = ret;
     unichar_t* in     = input;
-    unichar_t* in_end = input + u_strlen(input);
+    unichar_t* in_end = input + input_len;
     // trim comment and beyond from input
     {
 	unichar_t* p = input;

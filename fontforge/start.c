@@ -24,22 +24,27 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+#include <fontforge-version-extras.h>
+
+#include "start.h"
+
+#include "encoding.h"
+#include "ffglib.h"
 #include "fontforgevw.h"
-#include "pluginloading.h"
-#include <gfile.h>
-#include <time.h>
-#include <sys/time.h>
+#include "gfile.h"
+#include "namelist.h"
+#include "psfont.h"
+#include "unicodelibinfo.h"
+
 #include <locale.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
-#include <dynamic.h>
 #ifdef __Mac
 # include <stdlib.h>		/* getenv,setenv */
 #endif
-
-#include <glib.h>
-
-#include "gutils/unicodelibinfo.h"
-#include "psfont.h"
 
 int32 unicode_from_adobestd[256];
 struct lconv localeinfo;
@@ -68,39 +73,8 @@ static void initrand(void) {
     g_random_set_seed(tv.tv_usec);
 }
 
-/* FIXME: Is this necessary or desirable, given we now are using
- * libltdl modules? */
-static void initlibrarysearchpath(void) {
-#ifdef __Mac
-    /* If the user has not set library path, then point it at fink */
-    /*  otherwise leave alone. On the mac people often use fink to */
-    /*  install image libs. For some reason fink installs in a place */
-    /*  the dynamic loader doesn't find */
-    /* (And fink's attempts to set the PATH variables generally don't work */
-//    setenv("DYLD_LIBRARY_PATH","/sw/lib",0);
-#endif
-}
-
-static void initlibltdl(void) {
-    char buffer[2000];
-    char *userConfigDir;
-
-    if (!plugins_are_initialized()) {
-        init_plugins();
-        userConfigDir = getFontForgeUserDir(Config);
-        if ( userConfigDir != NULL ) {
-            strcpy(buffer,userConfigDir);
-            strcat(buffer,"/plugins");
-            free(userConfigDir);
-            lt_dladdsearchdir(buffer);
-        }
-    }
-}
-
 void InitSimpleStuff(void) {
 
-    initlibrarysearchpath();
-    initlibltdl();
     initrand();
     initadobeenc();
 
@@ -121,9 +95,7 @@ void doinitFontForgeMain(void) {
 
     if ( inited )
 return;
-#ifdef __MINGW32__
     FindProgDir(NULL);
-#endif
     InitSimpleStuff();
     if ( default_encoding==NULL )
 	default_encoding=FindOrMakeEncoding("ISO8859-1");
@@ -135,7 +107,7 @@ return;
 void doversion(const char *source_version_str) {
     if ( source_version_str!=NULL )
 	printf( "fontforge %s\n", source_version_str );
-    printf( "libfontforge %d\n",
-	    FONTFORGE_VERSIONDATE_RAW );
+    printf( "build date: %s\n",
+	    FONTFORGE_MODTIME_STR );
 exit(0);
 }

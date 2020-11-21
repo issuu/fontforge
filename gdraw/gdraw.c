@@ -24,38 +24,25 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "gdrawP.h"
-#include <gkeysym.h>
-#include <ustring.h>
-#include <gio.h>
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
+#include "gdrawP.h"
+#include "gkeysym.h"
+#include "ustring.h"
+
 #if __Mac
 #  include <sys/select.h>
 #endif
-
-
 
 /* Functions for font metrics:
     rectangle of text (left side bearing of first char, right of last char)
 */
 
 GDisplay *screen_display = NULL;
-GDisplay *printer_display = NULL;
 void (*_GDraw_BuildCharHook)(GDisplay *) = NULL;
 void (*_GDraw_InsCharHook)(GDisplay *,unichar_t) = NULL;
-
-void GDrawTerm(GDisplay *disp) {
-    (disp->funcs->term)(disp);
-}
-
-int GDrawGetRes(GWindow gw) {
-    if ( gw==NULL ) {
-	if ( screen_display==NULL )
-return( 100 );
-	gw = screen_display->groot;
-    }
-return( gw->display->res );
-}
 
 int GDrawPointsToPixels(GWindow gw,int points) {
     if ( gw==NULL ) {
@@ -90,9 +77,9 @@ GWindow GDrawCreateSubWindow(GWindow w, GRect *pos,
 return( (w->display->funcs->createSubWindow)(w,pos,eh,user_data,wattrs) );
 }
 
-GWindow GDrawCreatePixmap(GDisplay *gdisp, uint16 width, uint16 height) {
+GWindow GDrawCreatePixmap(GDisplay *gdisp, GWindow similar, uint16 width, uint16 height) {
     if ( gdisp==NULL ) gdisp = screen_display;
-return( (gdisp->funcs->createPixmap)(gdisp,width,height));
+return( (gdisp->funcs->createPixmap)(gdisp,similar,width,height));
 }
 
 GWindow GDrawCreateBitmap(GDisplay *gdisp, uint16 width, uint16 height, uint8 *data) {
@@ -127,17 +114,9 @@ void GDrawSetWindowBackground(GWindow w,Color col) {
     (w->display->funcs->setWindowBackground)(w,col);
 }
 
-void GDrawSetWindowBorder(GWindow w,int width,Color col) {
-    (w->display->funcs->setWindowBorder)(w,width,col);
-}
-
 int GDrawSetDither(GDisplay *gdisp, int dither) {
     if ( gdisp==NULL ) gdisp = screen_display;
 return( (gdisp->funcs->setDither)(gdisp,dither) );
-}
-
-void GDrawReparentWindow(GWindow child, GWindow parent, int x, int y) {
-    (child->display->funcs->reparentWindow)(child,parent,x,y);
 }
 
 void GDrawSetVisible(GWindow w, int visible) {
@@ -322,11 +301,6 @@ void GDrawBeep(GDisplay *gdisp) {
     (gdisp->funcs->beep)(gdisp);
 }
 
-void GDrawFlush(GDisplay *gdisp) {
-    if ( gdisp==NULL ) gdisp = screen_display;
-    (gdisp->funcs->flush)(gdisp);
-}
-
 void GDrawGetClip(GWindow w, GRect *ret) {
     *ret = w->ggc->clip;
 }
@@ -365,20 +339,8 @@ GGC *GDrawGetWindowGGC(GWindow w) {
 return( w->ggc );
 }
 
-void GDrawSetXORBase(GWindow w,Color col) {
-    w->ggc->xor_base = col;
-}
-
-void GDrawSetXORMode(GWindow w) {
-    w->ggc->func = df_xor;
-}
-
-void GDrawSetCopyMode(GWindow w) {
-    w->ggc->func = df_copy;
-}
-
-void GDrawSetCopyThroughSubWindows(GWindow w,int16 through) {
-    w->ggc->copy_through_sub_windows = through;
+void GDrawSetDifferenceMode(GWindow w) {
+    (w->display->funcs->setDifferenceMode)(w);
 }
 
 void GDrawSetDashedLine(GWindow w,int16 dash_len, int16 skip_len, int16 off) {
@@ -483,14 +445,40 @@ void GDrawScroll(GWindow w, GRect *rect, int32 hor, int32 vert) {
 
 /* draws the subset of the image specified by src starting at loc (x,y) */
 void GDrawDrawImage(GWindow w, GImage *img, GRect *src, int32 x, int32 y) {
-    GRect r;
-    if ( src==NULL ) {
-	struct _GImage *base = img->list_len==0?img->u.image:img->u.images[0];
-	r.x = r.y = 0;
-	r.width = base->width; r.height = base->height;
-	src = &r;
+    int width = GImageGetWidth(img);
+    int height = GImageGetHeight(img);
+    GRect r = src ? *src : (GRect){0, 0, width, height};
+
+    if (x < w->ggc->clip.x) {
+        r.x += w->ggc->clip.x - x;
+        r.width -= w->ggc->clip.x - x;
+        x = w->ggc->clip.x;
     }
-    (w->display->funcs->drawImage)(w,img,src,x,y);
+    if (y < w->ggc->clip.y) {
+        r.y += w->ggc->clip.y - y;
+        r.height -= w->ggc->clip.y - y;
+        y = w->ggc->clip.y;
+    }
+    if (r.x < 0) {
+        r.width += r.x;
+        r.x = 0;
+    }
+    if (r.y < 0) {
+        r.height += r.y;
+        r.y = 0;
+    }
+    if (r.width > width)
+        r.width = width;
+    if (r.height > height)
+        r.height = height;
+    if (x + r.width > w->ggc->clip.x + w->ggc->clip.width)
+        r.width = w->ggc->clip.x + w->ggc->clip.width - x;
+    if (y + r.height > w->ggc->clip.y + w->ggc->clip.height)
+        r.height = w->ggc->clip.y + w->ggc->clip.height - y;
+    if (r.width <= 0 || r.height <= 0)
+        return;
+
+    (w->display->funcs->drawImage)(w,img,&r,x,y);
 }
 
 /* Draw the entire image so that it is approximately the same size on other */
@@ -518,22 +506,9 @@ void GDrawDrawGlyph(GWindow w, GImage *img, GRect *src, int32 x, int32 y) {
     (w->display->funcs->drawGlyph)(w,img,src,x,y);
 }
 
-/* We got an expose event for the src rectangle. The image is supposed to be */
-/*  tiled across the window starting at (x,y) and continuing at least to the */
-/*  limit of the expose event. Figure out how to draw what bits of the image */
-/*  where and how many times */
-void GDrawTileImage(GWindow w, GImage *img, GRect *src, int32 x, int32 y) {
-    (w->display->funcs->tileImage)(w,img,src,x,y);
-}
-
 /* same as drawImage except with pixmaps */
 void GDrawDrawPixmap(GWindow w, GWindow pixmap, GRect *src, int32 x, int32 y) {
     (w->display->funcs->drawPixmap)(w,pixmap,src,x,y);
-}
-
-/* same as tileImage except with pixmaps */
-void GDrawTilePixmap(GWindow w, GWindow pixmap, GRect *src, int32 x, int32 y) {
-    (w->display->funcs->tilePixmap)(w,pixmap,src,x,y);
 }
 
 /* We assume the full image is drawn starting at (x,y) and scaled to (width,height) */
@@ -546,40 +521,10 @@ void GDrawDrawImageMagnified(GWindow w, GImage *img, GRect *dest, int32 x, int32
     GRect temp;
     struct _GImage *base = img->list_len==0?img->u.image:img->u.images[0];
 
+    /* Not magnified after all */
     if ( base->width==width && base->height==height ) {
-	/* Not magnified after all */
-	if ( dest==NULL )
-	    GDrawDrawImage(w,img,NULL,x,y);
-	else {
-	    int old;
-	    temp = *dest; temp.x += x; temp.y += y;
-	    if ( temp.x<x ) {
-		temp.x = 0;
-		temp.width-=x;
-	    } else {
-		old = x;
-		x = temp.x;
-		temp.x -= old;
-		temp.width -= old;
-	    }
-	    if ( temp.y<y ) {
-		temp.y = 0;
-		temp.height-=y;
-	    } else {
-		old = y;
-		y = temp.y;
-		temp.y -= old;
-		temp.height -= old;
-	    }
-	    if ( temp.x>=base->width || temp.y>=base->height || temp.width<=0 || temp.height<=0 )
-return;
-	    if ( temp.x+temp.width>=base->width )
-		temp.width = base->width-temp.x;
-	    if ( temp.y+temp.height>=base->height )
-		temp.height = base->height-temp.y;
-	    GDrawDrawImage(w,img,&temp,x,y);
-	}
-return;
+        GDrawDrawImage(w, img, dest, x, y);
+        return;
     }
     if ( dest==NULL ) {
 	temp.x = temp.y = 0;
@@ -595,15 +540,6 @@ return;
 	dest = &temp;
     }
     (w->display->funcs->drawImageMag)(w,img,dest,x,y, width, height);
-}
-
-GImage *GDrawCopyScreenToImage(GWindow w, GRect *rect) {
-    GRect temp;
-    if ( rect==NULL ) {
-	temp.x = 0; temp.y = 0; temp.width = w->pos.width; temp.height = w->pos.height;
-	rect = &temp;
-    }
-return( (w->display->funcs->copyScreenToImage)(w,rect) );
 }
 
 void GDrawWindowFontMetrics(GWindow w,FontInstance *fi,int *as, int *ds, int *ld) {
@@ -697,6 +633,10 @@ return(w->display->funcs->createInputContext)(w,def_style);
 
 void GDrawSetGIC(GWindow w, GIC *gic, int x, int y) {
     (w->display->funcs->setGIC)(w,gic,x,y);
+}
+
+int GDrawKeyState(GWindow w, int keysym) {
+    return (w->display->funcs->keyState)(w, keysym);
 }
 
 void GDrawGrabSelection(GWindow w,enum selnames sel) {
@@ -816,34 +756,6 @@ return;
     (gdisp->funcs->cancelTimer)(timer);
 }
 
-void GDrawSyncThread(GDisplay *gdisp, void (*func)(void *), void *data) {
-    if ( gdisp==NULL )
-	gdisp = screen_display;
-    if (gdisp != NULL)
-    (gdisp->funcs->syncThread)(gdisp,func,data);
-}
-
-GWindow GPrinterStartJob(GDisplay *gdisp,void *user_data,GPrinterAttrs *attrs) {
-    if ( gdisp==NULL )
-	gdisp = printer_display;
-    if (gdisp != NULL)
-        return( (gdisp->funcs->startJob)(gdisp,user_data,attrs) );
-    else
-        return NULL;
-}
-
-void GPrinterNextPage(GWindow w) {
-    if ( w==NULL )
-	w = printer_display->groot;
-    (w->display->funcs->nextPage)(w);
-}
-
-int GPrinterEndJob(GWindow w,int cancel) {
-    if ( w==NULL )
-	w = printer_display->groot;
-return( (w->display->funcs->endJob)(w,cancel) );
-}
-
 int GDrawRequestDeviceEvents(GWindow w,int devcnt,struct gdeveventmask *de) {
 return( (w->display->funcs->requestDeviceEvents)(w,devcnt,de) );
 }
@@ -934,19 +846,21 @@ return;
 
 void GDrawDestroyDisplays() {
   if (screen_display != NULL) {
+#ifndef FONTFORGE_CAN_USE_GDK
     _GXDraw_DestroyDisplay(screen_display);
+#else
+    _GGDKDraw_DestroyDisplay(screen_display);
+#endif
     screen_display = NULL;
-  }
-  if (printer_display != NULL) {
-    _GPSDraw_DestroyDisplay(printer_display);
-    printer_display = NULL;
   }
 }
 
 void GDrawCreateDisplays(char *displayname,char *programname) {
-    GIO_SetThreadCallback((void (*)(void *,void *,void *)) GDrawSyncThread);
+#ifndef FONTFORGE_CAN_USE_GDK
     screen_display = _GXDraw_CreateDisplay(displayname,programname);
-    printer_display = _GPSDraw_CreateDisplay();
+#else
+    screen_display = _GGDKDraw_CreateDisplay(displayname, programname);
+#endif
     if ( screen_display==NULL ) {
 	fprintf( stderr, "Could not open screen.\n" );
 #if __Mac
@@ -959,213 +873,3 @@ void GDrawCreateDisplays(char *displayname,char *programname) {
 exit(1);
     }
 }
-
-void *GDrawNativeDisplay(GDisplay *gdisp) {
-    if ( gdisp==NULL )
-	gdisp=screen_display;
-    if ( gdisp==NULL )
-return( NULL );
-
-return( (gdisp->funcs->nativeDisplay)(gdisp) );
-}
-
-
-void
-GDrawAddReadFD( GDisplay *gdisp,
-		int fd, void* udata,
-		void (*callback)(int fd, void* udata ))
-{
-    if ( !gdisp )
-    {
-	gdisp=screen_display;
-    }
-    
-    if( !gdisp )
-    {
-	// collab code being called from python scripted fontforge.
-	GDrawCreateDisplays( 0, "fontforge");
-	gdisp=screen_display;
-    }
-    
-    if( gdisp->fd_callbacks_last >= gdisplay_fd_callbacks_size )
-    {
-	fprintf(stderr,"Error: FontForge has attempted to add more read FDs than it is equipt to handle\n");
-	fprintf(stderr," Please report this error!\n");
-	return;
-    }
-    
-    fd_callback_t* cb = &gdisp->fd_callbacks[ gdisp->fd_callbacks_last ];
-    gdisp->fd_callbacks_last++;
-
-    cb->fd = fd;
-    cb->udata = udata;
-    cb->callback = callback;
-}
-
-static void
-fd_callback_clear( fd_callback_t* cb )
-{
-    cb->fd = 0;
-    cb->callback = 0;
-    cb->udata = 0;
-}
-
-
-void
-GDrawRemoveReadFD( GDisplay *gdisp,
-		   int fd, void* udata )
-{
-    if ( gdisp==NULL )
-	gdisp=screen_display;
-    if( !fd )
-	return;
-    
-    int idx = 0;
-    for( idx = 0; idx < gdisplay_fd_callbacks_size; ++idx )
-    {
-	fd_callback_t* cb = &gdisp->fd_callbacks[ idx ];
-	if( cb->fd == fd )
-	{
-	    if( idx+1 >= gdisp->fd_callbacks_last )
-	    {
-		gdisp->fd_callbacks_last--;
-		fd_callback_clear( cb );
-		return;
-	    }
-	    gdisp->fd_callbacks_last--;
-	    fd_callback_t* last = &gdisp->fd_callbacks[ gdisp->fd_callbacks_last ];
-	    memcpy( cb, last, sizeof(fd_callback_t) );
-	    fd_callback_clear( last );
-	    return;
-	}
-    }
-}
-
-
-
-#ifndef MAX
-#define MAX(x,y)   (((x) > (y)) ? (x) : (y))
-#endif
-				   
-/* void MacServiceZeroMQFDs() */
-/* { */
-/*     int ret = 0; */
-    
-/*     GDisplay *gdisp = GDrawGetDisplayOfWindow(0); */
-/*     int fd = 0; */
-/*     fd_set read, write, except; */
-/*     FD_ZERO(&read); FD_ZERO(&write); FD_ZERO(&except); */
-/*     struct timeval timeout; */
-/*     timeout.tv_sec = 0; */
-/*     timeout.tv_usec = 1; */
-
-/*     if( gdisp->zeromq_fd > 0 ) */
-/*     { */
-/* 	FD_SET(gdisp->zeromq_fd,&read); */
-/* 	fd = MAX( fd, gdisp->zeromq_fd ); */
-/*     } */
-/*     if( fd > 0 ) */
-/* 	ret = select(fd+1,&read,&write,&except,&timeout); */
-
-/*     if( FD_ISSET(gdisp->zeromq_fd,&read)) */
-/*     { */
-/* 	gdisp->zeromq_fd_callback( gdisp->zeromq_fd, gdisp->zeromq_datas ); */
-/*     } */
-/* } */
-
-
-void MacServiceReadFDs()
-{
-#if (!defined(__MINGW32__))&&(!defined(__CYGWIN__))
-    int ret = 0;
-    
-    GDisplay *gdisp = GDrawGetDisplayOfWindow(0);
-    int fd = 0;
-    fd_set read, write, except;
-    FD_ZERO(&read); FD_ZERO(&write); FD_ZERO(&except);
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 1;
-
-    int idx = 0;
-    for( idx = 0; idx < gdisp->fd_callbacks_last; ++idx )
-    {
-	fd_callback_t* cb = &gdisp->fd_callbacks[ idx ];
-	FD_SET(cb->fd,&read);
-	fd = MAX( fd, cb->fd );
-    }
-    
-    if( fd > 0 )
-	ret = select(fd+1,&read,&write,&except,&timeout);
-
-    for( idx = 0; idx < gdisp->fd_callbacks_last; ++idx )
-    {
-	fd_callback_t* cb = &gdisp->fd_callbacks[ idx ];
-	if( FD_ISSET(cb->fd,&read))
-	    cb->callback( cb->fd, cb->udata );
-    }
-#endif
-}
-
-
-
-static int BackgroundTimer_eh( GWindow w, GEvent* ev )
-{
-    if ( ev->type == et_timer )
-    {
-	BackgroundTimer_t* bgt = (BackgroundTimer_t*)ev->u.timer.userdata;
-	bgt->func( bgt->userdata );
-    }
-    return 0;
-}
-
-
-BackgroundTimer_t*
-BackgroundTimer_new( int32 BackgroundTimerMS, 
-		     BackgroundTimerFunc func,
-		     void *userdata )
-{
-    BackgroundTimer_t* ret = calloc( 1, sizeof(BackgroundTimer_t) );
-    ret->func = func;
-    ret->userdata = userdata;
-    ret->BackgroundTimerMS = BackgroundTimerMS;
-    
-    GWindowAttrs wattrs;
-    memset(&wattrs,0,sizeof(wattrs));
-    wattrs.mask = wam_events|wam_cursor|wam_utf8_wtitle|wam_isdlg|wam_positioned;
-    wattrs.event_masks = ~(1<<et_charup);
-    wattrs.is_dlg = true;
-    wattrs.positioned = true;
-    wattrs.utf8_window_title = "Timer Window";
-    GRect pos;
-    pos.width = 10;
-    pos.height = 10;
-    pos.x = 0;
-    pos.y = 0;
-    
-    GWindow w = GDrawCreateTopWindow( 0, &pos,
-				      BackgroundTimer_eh, ret, &wattrs );
-    ret->timer = GDrawRequestTimer( w, BackgroundTimerMS, BackgroundTimerMS, ret );
-    ret->w = w;
-    return ret;
-}
-
-void BackgroundTimer_remove( BackgroundTimer_t* t )
-{
-    if( !t )
-	return;
-
-    GDrawCancelTimer( t->timer );
-    GDrawDestroyWindow( t->w );
-    free(t);
-}
-
-void BackgroundTimer_touch( BackgroundTimer_t* t )
-{
-    if( !t )
-	return;
-    
-    GDrawCancelTimer( t->timer );
-    t->timer = GDrawRequestTimer( t->w, t->BackgroundTimerMS, t->BackgroundTimerMS, t );
-}
-

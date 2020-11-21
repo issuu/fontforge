@@ -24,6 +24,10 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef FONTFORGE_GGADGET_P_H
+#define FONTFORGE_GGADGET_P_H
+
 #include "ggadget.h"
 #include "gresedit.h"
 
@@ -354,6 +358,7 @@ typedef struct gtabset {
     int16 *rowstarts;		/* for each row, index into tab array of its first tab, one extra entry at end with tabcnt */
     int16 tabcnt;		/* number of tabs */
     int16 sel;			/* active tab */
+    int16 oldsel;       /* used when swapping tabs */
     int16 rcnt;			/* number of rows */
     int16 active_row;		/* row which is closest to the display area */
     int16 offset_per_row;	/* stagger tabs by this much */
@@ -371,7 +376,10 @@ typedef struct gtabset {
     unsigned int fill1line: 1;
     unsigned int vertical: 1;
     unsigned int nowindow: 1;
+    bool closable, movable;
     FontInstance *font;
+    void (*remove_sync)(GWindow gw, int pos);
+    void (*swap_sync)(GWindow gw, int pos_a, int pos_b);
     void (*nested_expose)(GWindow pixmap, GGadget *g, GEvent *event);
     int (*nested_mouse)(GGadget *g, GEvent *event);
     int16 vert_list_width;
@@ -591,6 +599,8 @@ extern GResInfo *_GMenuRIHead(void), *_GTabSetRIHead(void), *_GHVBoxRIHead(void)
 extern GResInfo *_GListRIHead(void), *_GMatrixEditRIHead(void), *_GDrawableRIHead(void);
 extern GResInfo *_GProgressRIHead(void);
 
-#define SERIF_UI_FAMILIES	"dejavu serif,times,caslon,serif,clearlyu,unifont"
-#define SANS_UI_FAMILIES	"dejavu sans,helvetica,caliban,sans,clearlyu,unifont"
-#define MONO_UI_FAMILIES	"courier,monospace,clearlyu,unifont"
+#define SERIF_UI_FAMILIES	"dejavu serif,times,caslon,serif,clearlyu,unifont,unifont upper"
+#define SANS_UI_FAMILIES	"dejavu sans,helvetica,caliban,sans,clearlyu,unifont,unifont upper"
+#define MONO_UI_FAMILIES	"courier,monospace,clearlyu,unifont,unifont upper"
+
+#endif /* FONTFORGE_GGADGET_P_H */

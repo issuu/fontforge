@@ -25,16 +25,37 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforge.h"
+
+#include <fontforge-config.h>
+
+#include "autohint.h"
+#include "autosave.h"
 #include "baseviews.h"
+#include "bitmapchar.h"
+#include "bvedit.h"
+#include "chardata.h"
+#include "cvundoes.h"
+#include "encoding.h"
+#include "fontforge.h"
+#include "fvcomposite.h"
+#include "fvfonts.h"
+#include "gfile.h"
+#include "gio.h"
+#include "gresource.h"
 #include "groups.h"
+#include "namelist.h"
 #include "psfont.h"
-#include <gfile.h>
-#include <gio.h>
-#include <ustring.h>
-#include <utype.h>
-#include <chardata.h>
-#include <gresource.h>
+#include "pua.h"
+#include "scripting.h"
+#include "sfd.h"
+#include "spiro.h"
+#include "splineoverlap.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
 #include <unistd.h>
 
@@ -352,7 +373,6 @@ return;
 }
 
 void FVBuildDuplicate(FontViewBase *fv) {
-    extern const int cns14pua[], amspua[];
     const int *pua = fv->sf->uni_interp==ui_trad_chinese ? cns14pua : fv->sf->uni_interp==ui_ams ? amspua : NULL;
     int i, cnt=0, gid;
     SplineChar dummy;
@@ -662,13 +682,15 @@ void FVTrans(FontViewBase *fv,SplineChar *sc,real transform[6], uint8 *sel,
 	    FVTrans(fv,mm->instances[j]->glyphs[sc->orig_pos],transform,sel,flags);
     }
 
-    if ( flags&fvt_alllayers ) {
-	for ( i=0; i<sc->layer_cnt; ++i )
-	    SCPreserveLayer(sc,i,fv->active_layer==i);
-    } else if ( fv->sf->multilayer )
-	SCPreserveState(sc,true);
-    else
-	SCPreserveLayer(sc,fv->active_layer,true);
+    if (!(flags & fvt_nopreserve)) {
+	if ( flags&fvt_alllayers ) {
+	    for ( i=0; i<sc->layer_cnt; ++i )
+		SCPreserveLayer(sc,i,fv->active_layer==i);
+	} else if ( fv->sf->multilayer )
+	    SCPreserveState(sc,true);
+	else
+	    SCPreserveLayer(sc,fv->active_layer,true);
+    }
     if ( !(flags&fvt_dontmovewidth) )
 	if ( transform[0]>0 && transform[3]>0 && transform[1]==0 && transform[2]==0 ) {
 	    int widthset = sc->widthset;
@@ -740,7 +762,8 @@ void FVTrans(FontViewBase *fv,SplineChar *sc,real transform[6], uint8 *sel,
 	/* Barry thinks rounding them is a bad idea. */
 	SCRound2Int(sc,fv->active_layer,1.0);
     }
-    SCCharChangedUpdate(sc,fv->active_layer);
+    if ( !(flags&fvt_noupdate) )
+	SCCharChangedUpdate(sc,fv->active_layer);
 }
 
 void FVTransFunc(void *_fv,real transform[6],int otype, BVTFunc *bvts,
@@ -1189,8 +1212,8 @@ void CIDSetEncMap(FontViewBase *fv, SplineFont *new ) {
     if ( fv->cidmaster!=NULL && gcnt!=fv->sf->glyphcnt ) {
 	int i;
 	if ( fv->map->encmax<gcnt ) {
-	    fv->map->map = realloc(fv->map->map,gcnt*sizeof(int));
-	    fv->map->backmap = realloc(fv->map->backmap,gcnt*sizeof(int));
+	    fv->map->map = realloc(fv->map->map,gcnt*sizeof(int32));
+	    fv->map->backmap = realloc(fv->map->backmap,gcnt*sizeof(int32));
 	    fv->map->backmax = fv->map->encmax = gcnt;
 	}
 	for ( i=0; i<gcnt; ++i )
@@ -1199,7 +1222,7 @@ void CIDSetEncMap(FontViewBase *fv, SplineFont *new ) {
 	    memset(fv->selected+gcnt,0,fv->map->enccount-gcnt);
 	else {
 	    free(fv->selected);
-	    fv->selected = calloc(gcnt,sizeof(char));
+	    fv->selected = calloc(gcnt,sizeof(uint8));
 	}
 	fv->map->enccount = gcnt;
     }
@@ -1420,7 +1443,7 @@ void FVBuildAccent(FontViewBase *fv,int onlyaccents) {
 	if ( SFIsSomethingBuildable(fv->sf,sc,fv->active_layer,onlyaccents) ) {
 	    sc = SFMakeChar(fv->sf,fv->map,i);
 	    sc->ticked = true;
-	    SCBuildComposit(fv->sf,sc,fv->active_layer,fv->active_bitmap,onlycopydisplayed);
+	    SCBuildComposit(fv->sf,sc,fv->active_layer,fv->active_bitmap,onlycopydisplayed,onlyaccents);
 	}
 	if ( !ff_progress_next())
     break;
@@ -1583,7 +1606,7 @@ void FVMetricsCenter(FontViewBase *fv,int docenter) {
     memset(itransform,0,sizeof(itransform));
     transform[0] = transform[3] = 1.0;
     itransform[0] = itransform[3] = 1.0;
-    itransform[2] = tan( fv->sf->italicangle * 3.1415926535897932/180.0 );
+    itransform[2] = tan( fv->sf->italicangle * FF_PI/180.0 );
     bvts[1].func = bvt_none;
     bvts[0].func = bvt_transmove; bvts[0].y = 0;
     if ( !fv->sf->onlybitmaps ) {
@@ -1669,16 +1692,16 @@ return;
 	char *buf = malloc(strlen(old->filename)+20);
 	strcpy(buf,old->filename);
 	if ( old->compression!=0 ) {
-	    char *tmpfile;
+	    char *tmpf;
 	    strcat(buf,compressors[old->compression-1].ext);
 	    strcat(buf,"~");
-	    tmpfile = Decompress(buf,old->compression-1);
-	    if ( tmpfile==NULL )
+	    tmpf = Decompress(buf,old->compression-1);
+	    if ( tmpf==NULL )
 		temp = NULL;
 	    else {
-		temp = ReadSplineFont(tmpfile,0);
-		unlink(tmpfile);
-		free(tmpfile);
+		temp = ReadSplineFont(tmpf,0);
+		unlink(tmpf);
+		free(tmpf);
 	    }
 	} else {
 	    strcat(buf,"~");
@@ -1687,17 +1710,17 @@ return;
 	free(buf);
     } else {
 	if ( old->compression!=0 ) {
-	    char *tmpfile;
+	    char *tmpf;
 	    char *buf = malloc(strlen(old->filename)+20);
 	    strcpy(buf,old->filename);
 	    strcat(buf,compressors[old->compression-1].ext);
-	    tmpfile = Decompress(buf,old->compression-1);
-	    if ( tmpfile==NULL )
+	    tmpf = Decompress(buf,old->compression-1);
+	    if ( tmpf==NULL )
 		temp = NULL;
 	    else {
-		temp = ReadSplineFont(tmpfile,0);
-		unlink(tmpfile);
-		free(tmpfile);
+		temp = ReadSplineFont(tmpf,0);
+		unlink(tmpf);
+		free(tmpf);
 	    }
 	} else
 	    temp = ReadSplineFont(old->origname,0);
@@ -1917,7 +1940,7 @@ static FontViewBase *_FontViewBaseCreate(SplineFont *sf) {
 	fv->map = EncMap1to1(sf->glyphcnt);
 	if ( fv->nextsame==NULL ) { sf->map = fv->map; }
     }
-    fv->selected = calloc(fv->map->enccount,sizeof(char));
+    fv->selected = calloc(fv->map->enccount,sizeof(uint8));
 
 #ifndef _NO_PYTHON
     PyFF_InitFontHook(fv);

@@ -24,22 +24,41 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "config.h"
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
+
+#include "autohint.h"
+#include "basics.h"
+#include "bitmapchar.h"
+#include "bvedit.h"
+#include "cvexport.h"
+#include "cvimages.h"
 #include "fontforgevw.h"
-#include "views.h"
-#include <math.h>
-#include <ustring.h>
-#include <utype.h>
-#include "inc/basics.h"
-#include "inc/gfile.h"
+#include "fvfonts.h"
+#include "gfile.h"
+#include "namelist.h"
 #include "psfont.h"
+#include "sfd.h"
+#include "spiro.h"
+#include "splinefill.h"
+#include "splineorder2.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "svg.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
+#include "views.h"
+
+#include <math.h>
 
 #ifndef HAVE_EXECINFO_H
 // no backtrace available
 #else
     #include <execinfo.h>
 #endif
-#include "collabclient.h"
 
 extern char *coord_sep;
 
@@ -52,9 +71,6 @@ int export_clipboard = 0;
 int export_clipboard = 1;
 #endif
 
-extern void *UHintCopy(SplineChar *sc,int docopy);
-extern void ExtractHints(SplineChar *sc,void *hints,int docopy);
-extern void UndoesFreeButRetainFirstN( Undoes** undopp, int retainAmount );
 
 /* ********************************* Undoes ********************************* */
 
@@ -592,9 +608,6 @@ static Undoes *CVAddUndo(CharViewBase *cv,Undoes *undo) {
 			   &cv->layerheads[cv->drawmode]->undoes,
 			   &cv->layerheads[cv->drawmode]->redoes );
 
-    /* Let collab system know that a new undo state */
-    /* was pushed now since it last sent a message. */
-    collabclient_CVPreserveStateCalled( cv );
     return( ret );
 }
 
@@ -633,13 +646,6 @@ return(NULL);
     undo->u.state.dostroke = cv->layerheads[cv->drawmode]->dostroke;
     undo->u.state.fillfirst = cv->layerheads[cv->drawmode]->fillfirst;
     undo->layer = cv->drawmode;
-//    printf("CVPreserveState() dm:%d layer:%d new undo is at %p\n", cv->drawmode, layer, undo );
-
-    // MIQ: Note, this is the wrong time to call sendRedo as we are
-    // currently taking the undo state snapshot, after that the app
-    // will modify the local state, and that modification is what we
-    // are interested in sending on the wire, not the old undo state.
-    // collabclient_sendRedo( cv );
 
 return( CVAddUndo(cv,undo));
 }
@@ -740,7 +746,6 @@ Undoes *SCPreserveState(SplineChar *sc,int dohints) {
 	    SCPreserveLayer(sc,i,false);
 
     Undoes* ret = SCPreserveLayer( sc, ly_fore, dohints );
-    collabclient_SCPreserveStateCalled( sc );
     return( ret );
 }
 
@@ -852,9 +857,6 @@ return(NULL);
 
     Undoes* ret = AddUndo(undo,&sc->layers[ly_fore].undoes,&sc->layers[ly_fore].redoes);
 
-    /* Let collab system know that a new undo state */
-    /* was pushed now since it last sent a message. */
-    collabclient_SCPreserveStateCalled( sc );
     return(ret);
 }
 
@@ -936,16 +938,16 @@ static void SCUndoAct(SplineChar *sc,int layer, Undoes *undo) {
 	Layer *head = layer==ly_grid ? &sc->parent->grid : &sc->layers[layer];
 	SplinePointList *spl = head->splines;
 
-	printf("SCUndoAct() ut_state case, layer:%d sc:%p scn:%s scw:%d uw:%d\n",
-	       layer, sc, sc->name, sc->width, undo->u.state.width );
+//	printf("SCUndoAct() ut_state case, layer:%d sc:%p scn:%s scw:%d uw:%d\n",
+//	       layer, sc, sc->name, sc->width, undo->u.state.width );
 	
 	if ( layer==ly_fore ) {
 	    int width = sc->width;
 	    int vwidth = sc->vwidth;
 	    if ( sc->width!=undo->u.state.width )
 	    {
-		printf("SCUndoAct() sc:%p scn:%s scw:%d uw:%d\n",
-		       sc, sc->name, sc->width, undo->u.state.width );
+//		printf("SCUndoAct() sc:%p scn:%s scw:%d uw:%d\n",
+//		       sc, sc->name, sc->width, undo->u.state.width );
 		SCSynchronizeWidth(sc,undo->u.state.width,width,NULL);
 	    }
 	    sc->vwidth = undo->u.state.vwidth;
@@ -1010,7 +1012,7 @@ static void SCUndoAct(SplineChar *sc,int layer, Undoes *undo) {
 void CVDoUndo(CharViewBase *cv) {
     Undoes *undo = cv->layerheads[cv->drawmode]->undoes;
 
-    printf("CVDoUndo() undo:%p u->next:%p\n", undo, ( undo ? undo->next : 0 ) );
+//    printf("CVDoUndo() undo:%p u->next:%p\n", undo, ( undo ? undo->next : 0 ) );
     if ( undo==NULL )		/* Shouldn't happen */
 	return;
 
@@ -1021,9 +1023,7 @@ void CVDoUndo(CharViewBase *cv) {
     undo->next = cv->layerheads[cv->drawmode]->redoes;
     cv->layerheads[cv->drawmode]->redoes = undo;
 
-    if ( !collabclient_generatingUndoForWire(cv) ) {
-	_CVCharChangedUpdate(cv,undo->was_modified);
-    }
+    _CVCharChangedUpdate(cv,undo->was_modified);
 }
 
 void CVDoRedo(CharViewBase *cv) {
@@ -1077,12 +1077,14 @@ void _CVRestoreTOriginalState(CharViewBase *cv,PressedOn *p) {
     ImageList *img, *uimg;
     int j;
 
-    SplinePointListSet(cv->layerheads[cv->drawmode]->splines,undo->u.state.splines);
+    SplinePointListFree(cv->layerheads[cv->drawmode]->splines);
+    cv->layerheads[cv->drawmode]->splines = SplinePointListCopy(undo->u.state.splines);
     if ( !p->anysel || p->transanyrefs ) {
 	for ( ref=cv->layerheads[cv->drawmode]->refs, uref=undo->u.state.refs; uref!=NULL; ref=ref->next, uref=uref->next )
 	    for ( j=0; j<uref->layer_cnt; ++j )
 		if ( uref->layers[j].splines!=NULL ) {
-		    SplinePointListSet(ref->layers[j].splines,uref->layers[j].splines);
+		    SplinePointListFree(cv->layerheads[cv->drawmode]->splines);
+		    cv->layerheads[cv->drawmode]->splines = SplinePointListCopy(undo->u.state.splines);
 		    memcpy(&ref->transform,&uref->transform,sizeof(ref->transform));
 		}
     }
@@ -1119,6 +1121,9 @@ void _CVUndoCleanup(CharViewBase *cv,PressedOn *p) {
 
 void CVRemoveTopUndo(CharViewBase *cv) {
     Undoes * undo = cv->layerheads[cv->drawmode]->undoes;
+
+    if (undo == NULL)
+	return; // Shouldn't happen
 
     cv->layerheads[cv->drawmode]->undoes = undo->next;
     undo->next = NULL;
@@ -1403,7 +1408,7 @@ static void *copybuffer2svg(void *UNUSED(_copybuffer),int32 *len) {
 return( copy(""));
     }
 
-    svg = tmpfile();
+    svg = GFileTmpfile();
     if ( svg==NULL ) {
 	*len=0;
 return( copy(""));
@@ -1422,7 +1427,7 @@ return( copy(""));
     old_order2 = dummy.parent->layers[ly_fore].order2;
     dummy.parent->layers[ly_fore].order2 = cur->was_order2;
     dummy.layers[ly_fore].order2 = cur->was_order2;
-    _ExportSVG(svg,&dummy,ly_fore);
+    _ExportSVG(svg,&dummy,ly_fore,ExportParamsState());
     dummy.parent->layers[ly_fore].order2 = old_order2;
 
     for ( lcnt = ly_fore; lcnt<dummy.layer_cnt; ++lcnt )
@@ -1455,7 +1460,7 @@ static void *copybuffer2svgmult(void *UNUSED(_copybuffer),int32 *len) {
 return( copy(""));
     }
 
-    svg = tmpfile();
+    svg = GFileTmpfile();
     if ( svg==NULL ) {
 	*len=0;
 return( copy(""));
@@ -1571,7 +1576,7 @@ return( copy(""));
 	dummy.layers[ly_fore].refs = XCopyInstanciateRefs(cur->u.state.refs,&dummy,ly_fore);
     }
 
-    eps = tmpfile();
+    eps = GFileTmpfile();
     if ( eps==NULL ) {
 	*len=0;
 return( copy(""));
@@ -2102,54 +2107,63 @@ static void PasteNonExistantRefCheck(SplineChar *sc,Undoes *paster,RefChar *ref,
     }
 }
 
+static const char* SCGetPasteableClipboardType(int* type) {
+    static const char* mimes[] = {
+        "image/svg+xml",
+        "image/svg-xml",
+        "image/svg",
+        "image/x-inkscape-svg",
+        "image/eps",
+        "image/ps",
+#ifndef _NO_LIBPNG
+        "image/png",
+#endif
+        "image/bmp",
+        NULL
+    };
+
+    if (no_windowing_ui) {
+        return NULL;
+    }
+
+    for (int tp = 0; mimes[tp]; ++tp) {
+        if (ClipboardHasType(mimes[tp])) {
+            if (type) {
+                *type = tp;
+            }
+            return mimes[tp];
+        }
+    }
+    return NULL;
+}
+
+int SCClipboardHasPasteableContents(void) {
+    return SCGetPasteableClipboardType(NULL) != NULL;
+}
+
 static void SCCheckXClipboard(SplineChar *sc,int layer,int doclear) {
     int type; int32 len;
+    const char *mime;
     char *paste;
     FILE *temp;
     GImage *image;
-    int sx=0, s_x=0;
 
-    if ( no_windowing_ui )
-return;
-    type = 0;
-    /* SVG is a better format (than eps) if we've got it because it doesn't */
-    /*  force conversion of quadratic to cubic and back */
-    if ( HasSVG() && ((sx = ClipboardHasType("image/svg+xml")) ||
-			(s_x = ClipboardHasType("image/svg-xml")) ||
-			ClipboardHasType("image/svg")) )
-	type = sx ? 1 : s_x ? 2 : 3;
-    else
-    if ( ClipboardHasType("image/eps") )
-	type = 4;
-    else if ( ClipboardHasType("image/ps") )
-	type = 5;
-#ifndef _NO_LIBPNG
-    else if ( ClipboardHasType("image/png") )
-	type = 6;
-#endif
-    else if ( ClipboardHasType("image/bmp") )
-	type = 7;
+    if ((mime = SCGetPasteableClipboardType(&type)) == NULL) {
+        return;
+    }
 
-    if ( type==0 )
-return;
-
-    paste = ClipboardRequest(type==1?"image/svg+xml":
-		type==2?"image/svg-xml":
-		type==3?"image/svg":
-		type==4?"image/eps":
-		type==5?"image/ps":
-		type==6?"image/png":"image/bmp",&len);
+    paste = ClipboardRequest(mime, &len);
     if ( paste==NULL )
 return;
 
-    temp = tmpfile();
+    temp = GFileTmpfile();
     if ( temp!=NULL ) {
 	fwrite(paste,1,len,temp);
 	rewind(temp);
 	if ( type==4 || type==5 ) {	/* eps/ps */
-	    SCImportPSFile(sc,layer,temp,doclear,-1);
+	    SCImportPSFile(sc,layer,temp,doclear,ImportParamsState());
 	} else if ( type<=3 ) {
-	    SCImportSVG(sc,layer,NULL,paste,len,doclear);
+	    SCImportSVG(sc,layer,NULL,paste,len,doclear,ImportParamsState());
 	} else {
 #ifndef _NO_LIBPNG
 	    if ( type==6 )
@@ -2157,7 +2171,7 @@ return;
 	    else
 #endif
 		image = GImageRead_Bmp(temp);
-	    SCAddScaleImage(sc,image,doclear,layer);
+	    SCAddScaleImage(sc,image,doclear,layer,ImportParamsState());
 	}
 	fclose(temp);
     }
@@ -3062,7 +3076,6 @@ return;
 	if ( paster->u.state.anchor!=NULL && !cvsc->searcherdummy )
 	    APMerge(cvsc,paster->u.state.anchor);
 	if ( paster->u.state.refs!=NULL && cv->drawmode!=dm_grid ) {
-	    RefChar *last=NULL;
 	    RefChar *new, *refs;
 	    SplineChar *sc;
 	    for ( refs = paster->u.state.refs; refs!=NULL; refs=refs->next ) {
@@ -3833,7 +3846,7 @@ static void _PasteAnchorClassManip(SplineFont *sf,AnchorClass *into,AnchorClass 
 	    if ( temp->u.composit.state==NULL )
 	break;
 	    temp = temp->u.composit.state;
-	    /* Fall through */;
+	    /* Fall through */
 	  case ut_state: case ut_statehint: case ut_statename:
 	    if ( temp->copied_from!=sf )
 return;

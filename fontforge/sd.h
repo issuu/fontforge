@@ -24,9 +24,11 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _SD_H
-#define _SD_H
-# include <gimage.h>
+
+#ifndef FONTFORGE_SD_H
+#define FONTFORGE_SD_H
+
+# include "gimage.h"
 
 /* All coordinates are in millimeters */
 /* they will be displayed to the user scaled by the units field of the design */
@@ -62,6 +64,7 @@ struct filledsplines {
     unsigned int isfillable: 1;		/* All splinesets are closed */
     Pen fill, stroke;			/* A value of 0xffffffff means do not fill or stroke */
     float stroke_width;
+    float miterlimit;
     enum linejoin join;
     enum linecap cap;
     real transform[6];			/* The stroke may be quite different depending on the transformation (ie. ellipse not circle, rotated, etc) */
@@ -79,7 +82,7 @@ struct image {
     Color col;				/* that gets poured into imagemasks */
 };
 
-struct group {
+struct e_group {
     struct entity *group;
 };
 
@@ -91,7 +94,7 @@ typedef struct entity {
 	struct filledsplines splines;
 	struct text text;
 	struct image image;
-	struct group group;
+	struct e_group group;
     } u;
     SplineSet *clippath;
     DBounds bb;
@@ -124,12 +127,6 @@ typedef struct splinedesign {
     struct dview *dvs;
 } SplineDesign, Design;
 
-extern Entity *EntityInterpretPS(FILE *ps,int *width);
-extern Entity *EntityInterpretSVG(char *filename,char *memory, int memlen, int em_size,int ascent);
-extern Entity *EntityInterpretPDFPage(FILE *pdf,int select_page);
-extern SplinePointList *SplinesFromEntities(Entity *ent,int *flags,int is_stroked);
-extern void SCAppendEntityLayers(SplineChar *sc, Entity *ent);
-extern void EntityDefaultStrokeFill(Entity *ent);
 
 	/* Used for type3 fonts briefly */
 /* This is not a "real" structure. It is a temporary hack that encompasses */
@@ -142,7 +139,6 @@ typedef struct entitychar {
     uint8 fromtype3;
 } EntityChar;
 
-extern SplinePointList *SplinesFromEntityChar(EntityChar *ec,int *flags,int is_stroked);
 
 struct pskeydict {
     int16 cnt, max;
@@ -177,4 +173,37 @@ typedef struct retstack {
     real *stack;
 } RetStack;
 
-#endif
+enum shown_params {
+    sp_svg = 1,
+    sp_eps = 2,
+    sp_scale = 4
+};
+
+typedef struct importparams {
+    // Could be bits but the python interface would be annoying
+    int initialized;
+    int shown_mask, show_always;
+
+    int correct_direction;	// PS
+    int simplify;
+    int clip;			// SVG
+    int erasers;		// PS
+    int scale;			// Misc
+    bigreal accuracy_target;
+    bigreal default_joinlimit;
+} ImportParams;
+
+typedef struct exportparams {
+    // Could be bits but the python interface would be annoying
+    int initialized;
+    int shown_mask, show_always;
+
+    int use_transform;		// SVG
+} ExportParams;
+
+extern void InitImportParams(ImportParams *ip);
+extern ImportParams *ImportParamsState(void);
+extern void InitExportParams(ExportParams *ep);
+extern ExportParams *ExportParamsState(void);
+
+#endif /* FONTFORGE_SD_H */

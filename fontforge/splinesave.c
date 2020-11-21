@@ -24,15 +24,29 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "splinesave.h"
+
+#include "autohint.h"
+#include "dumppfa.h"
 #include "fontforge.h"
-#include <stdio.h>
-#include <math.h>
-#include "splinefont.h"
+#include "fvfonts.h"
+#include "gwidget.h"
+#include "parsepfa.h"
 #include "psfont.h"
-#include <ustring.h>
+#include "splinefont.h"
+#include "splineorder2.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
+#include <stdio.h>
 #include <string.h>
-#include <utype.h>
-#include <gwidget.h>
 
 float GenerateHintWidthEqualityTolerance = 0.0;
 int autohint_before_generate = 1;
@@ -2908,6 +2922,10 @@ static void RSC2PS2(GrowBuf *gb, SplineChar *base,SplineChar *rsc,
 	rsc->hconflicts = false; rsc->vconflicts = false;
     } else {
 	for ( r=rsc->layers[layer].refs; r!=NULL; r=r->next ) {
+	    /* Ensure hintmask on refs are set correctly */
+	    if (SCNeedsSubsPts(r->sc, ff_otf, layer))
+	        SCFigureHintMasks(r->sc, layer);
+
 	    if ( !r->justtranslated )
 	continue;
 	    if ( r->sc->hconflicts || r->sc->vconflicts ) {

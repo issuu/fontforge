@@ -24,8 +24,11 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GFILE_H
-#define _GFILE_H
+
+#ifndef FONTFORGE_GFILE_H
+#define FONTFORGE_GFILE_H
+
+#include "basics.h"
 
 /* For mode_t */
 #include <sys/types.h>
@@ -34,7 +37,6 @@
 enum { Cache, Config, Data };
 
 int mkdir_p(const char *path, mode_t mode);
-char *smprintf(const char *fmt, ...);
 
 extern char *GFileNormalizePath(char *path);
 extern unichar_t *u_GFileNormalizePath(unichar_t *path);
@@ -70,8 +72,9 @@ extern int GFileExists(const char *file);
 extern int GFileModifyable(const char *file);
 extern int GFileModifyableDir(const char *file);
 extern int GFileReadable(const char *file);
+extern FILE* GFileTmpfile();
 extern int GFileRemove(const char *path, int recursive);
-extern int GFileMkDir(const char *name);
+extern int GFileMkDir(const char *name, int mode);
 extern int GFileRmDir(const char *name);
 extern int GFileUnlink(const char *name);
 extern char *_GFile_find_program_dir(char *prog);
@@ -93,7 +96,6 @@ extern int u_GFileUnlink(unichar_t *name);
 extern off_t GFileGetSize(char *name);
 extern char *GFileReadAll(char *name);
 extern int   GFileWriteAll(char *filepath, char *data);
-extern char* getGResourceProgramDir(void);
 extern void  FindProgDir(char *prog);
 extern char *getShareDir(void);
 extern char *getLocaleDir(void);
@@ -142,4 +144,4 @@ extern char* getLibexecDir_NonWindows(void);
 
 
 
-#endif
+#endif /* FONTFORGE_GFILE_H */

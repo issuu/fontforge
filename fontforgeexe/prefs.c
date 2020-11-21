@@ -25,40 +25,42 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgeui.h"
-#include "groups.h"
-#include "plugins.h"
-#include <charset.h>
-#include <gfile.h>
-#include <gresource.h>
-#include <gresedit.h>
-#include <ustring.h>
-#include <gkeysym.h>
 
-#include <sys/types.h>
+#include <fontforge-config.h>
+
+#include "autotrace.h"
+#include "charset.h"
+#include "encoding.h"
+#include "ffglib.h"
+#include "fontforgeui.h"
+#include "gfile.h"
+#include "gkeysym.h"
+#include "gresedit.h"
+#include "gresource.h"
+#include "groups.h"
+#include "macenc.h"
+#include "namelist.h"
+#include "othersubrs.h"
+#include "prefs.h"
+#include "sfd.h"
+#include "splineutil.h"
+#include "ttf.h"
+#include "ustring.h"
+
 #include <dirent.h>
 #include <locale.h>
-#include <time.h>
-#include <sys/time.h>
 #include <stdlib.h>
-
-#include "ttf.h"
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
 
 #if HAVE_LANGINFO_H
 # include <langinfo.h>
 #endif
 
-#define GTimer GTimer_GTK
-#include <glib.h>
-#undef GTimer
-
-#include "collabclient.h"
-
-#define RAD2DEG	(180/3.1415926535897932)
+#define RAD2DEG	(180/FF_PI)
 
 static void change_res_filename(const char *newname);
-
-#include "gutils/prefs.h"
 
 extern int splash;
 extern int adjustwidth;
@@ -74,6 +76,9 @@ extern int GraveAcuteCenterBottom;
 extern int PreferSpacingAccents;
 extern int CharCenterHighest;
 extern int ask_user_for_resolution;
+#ifndef _NO_LIBPNG
+extern int WritePNGInSFD;
+#endif
 extern int stop_at_join;
 extern int recognizePUA;
 extern float arrowAmount;
@@ -81,7 +86,6 @@ extern float arrowAccelFactor;
 extern float snapdistance;
 extern float snapdistancemeasuretool;
 extern int measuretoolshowhorizontolvertical;
-extern int xorrubberlines;
 extern int snaptoint;
 extern float joinsnap;
 extern char *BDFFoundry;
@@ -165,6 +169,7 @@ extern float prefs_cvEditHandleSize;            /* in charview.c */
 extern int prefs_cvInactiveHandleAlpha;         /* in charview.c */
 extern int mv_width;				/* in metricsview.c */
 extern int mv_height;				/* in metricsview.c */
+extern int fvmv_selectmax;			/* in metricsview.c */
 extern int bv_width;				/* in bitmapview.c */
 extern int bv_height;				/* in bitmapview.c */
 extern int ask_user_for_cmap;			/* in parsettf.c */
@@ -188,10 +193,9 @@ extern int prefs_cv_show_control_points_always_initially; /* from charview.c */
 extern int prefs_create_dragging_comparison_outline;      /* from charview.c */
 extern int prefs_cv_outline_thickness; /* from charview.c */
 
-extern char *pref_collab_last_server_connected_to; /* in collabclient.c */
-
 extern float OpenTypeLoadHintEqualityTolerance;  /* autohint.c */
 extern float GenerateHintWidthEqualityTolerance; /* splinesave.c */
+extern int warn_script_unsaved; /* fontview.c */
 extern NameList *force_names_when_opening;
 extern NameList *force_names_when_saving;
 extern NameList *namelist_for_new_fonts;
@@ -309,6 +313,7 @@ static struct prefs_list {
 	{ N_("AutoSaveFrequency"), pr_int, &AutoSaveFrequency, NULL, NULL, '\0', NULL, 0, N_( "The number of seconds between autosaves. If you set this to 0 there will be no autosaves.") },
 	{ N_("RevisionsToRetain"), pr_int, &prefRevisionsToRetain, NULL, NULL, '\0', NULL, 0, N_( "When Saving, keep this number of previous versions of the file. file.sfd-01 will be the last saved file, file.sfd-02 will be the file saved before that, and so on. If you set this to 0 then no revisions will be retained.") },
 	{ N_("UndoRedoLimitToSave"), pr_int, &UndoRedoLimitToSave, NULL, NULL, '\0', NULL, 0, N_( "The number of undo and redo operations which will be saved in sfd files.\nIf you set this to 0 undo/redo information is not saved to sfd files.\nIf set to -1 then all available undo/redo information is saved without limit.") },
+	{ N_("WarnScriptUnsaved"), pr_bool, &warn_script_unsaved, NULL, NULL, '\0', NULL, 0, N_( "Whether or not to warn you if you have an unsaved script in the «Execute Script» dialog.") },
 	PREFS_LIST_EMPTY
 },
   new_list[] = {
@@ -331,34 +336,35 @@ static struct prefs_list {
   navigation_list[] = {
 	{ N_("GlyphAutoGoto"), pr_bool, &cv_auto_goto, NULL, NULL, '\0', NULL, 0, N_("Typing a normal character in the glyph view window changes the window to look at that character.\nEnabling GlyphAutoGoto will disable the shortcut where holding just the ` key will enable Preview mode as long as the key is held.") },
 	{ N_("OpenCharsInNewWindow"), pr_bool, &OpenCharsInNewWindow, NULL, NULL, '\0', NULL, 0, N_("When double clicking on a character in the font view\nopen that character in a new window, otherwise\nreuse an existing one.") },
+	{ N_("FontViewMetricsViewSelectMax"), pr_int, &fvmv_selectmax, NULL, NULL, '\0', NULL, 0, N_("When characters are selected in the FontView, how many should be put into the MetricsView if you open one? Negative values mean there's no limit, which should be used sparingly.") },
 	PREFS_LIST_EMPTY
 },
   editing_list[] = {
 	{ N_("ItalicConstrained"), pr_bool, &ItalicConstrained, NULL, NULL, '\0', NULL, 0, N_("In the Outline View, the Shift key constrains motion to be parallel to the ItalicAngle rather than constraining it to be vertical.") },
-	{ N_("ArrowMoveSize"), pr_real, &arrowAmount, NULL, NULL, '\0', NULL, 0, N_("The number of em-units by which an arrow key will move a selected point") },
-	{ N_("ArrowAccelFactor"), pr_real, &arrowAccelFactor, NULL, NULL, '\0', NULL, 0, N_("Holding down the Shift key will speed up arrow key motion by this factor") },
-	{ N_("DrawOpenPathsWithHighlight"), pr_bool, &DrawOpenPathsWithHighlight, NULL, NULL, '\0', NULL, 0, N_("Open paths should be drawn in a special highlight color to make them more apparent.") },
 	{ N_("InterpolateCPsOnMotion"), pr_bool, &interpCPsOnMotion, NULL, NULL, '\0', NULL, 0, N_("When moving one end point of a spline but not the other\ninterpolate the control points between the two.") },
 	{ N_("SnapDistance"), pr_real, &snapdistance, NULL, NULL, '\0', NULL, 0, N_("When the mouse pointer is within this many pixels\nof one of the various interesting features (baseline,\nwidth, grid splines, etc.) the pointer will snap\nto that feature.") },
 	{ N_("SnapDistanceMeasureTool"), pr_real, &snapdistancemeasuretool, NULL, NULL, '\0', NULL, 0, N_("When the measure tool is active and when the mouse pointer is within this many pixels\nof one of the various interesting features (baseline,\nwidth, grid splines, etc.) the pointer will snap\nto that feature.") },
-	{ N_("MeasureToolShowHorizontalVertical"), pr_bool, &measuretoolshowhorizontolvertical, NULL, NULL, '\0', NULL, 0, N_("Have the measure tool show horizontal and vertical distances on the canvas.") },
-	{ N_("XORRubberLines"), pr_bool, &xorrubberlines, NULL, NULL, '\0', NULL, 0, N_("Use XOR based rubber lines.") },
 	{ N_("SnapToInt"), pr_bool, &snaptoint, NULL, NULL, '\0', NULL, 0, N_("When the user clicks in the editing window, round the location to the nearest integers.") },
-	{ N_("JoinSnap"), pr_real, &joinsnap, NULL, NULL, '\0', NULL, 0, N_("The Edit->Join command will join points which are this close together\nA value of 0 means they must be coincident") },
 	{ N_("StopAtJoin"), pr_bool, &stop_at_join, NULL, NULL, '\0', NULL, 0, N_("When dragging points in the outline view a join may occur\n(two open contours may connect at their endpoints). When\nthis is On a join will cause FontForge to stop moving the\nselection (as if the user had released the mouse button).\nThis is handy if your fingers are inclined to wiggle a bit.") },
+	{ N_("JoinSnap"), pr_real, &joinsnap, NULL, NULL, '\0', NULL, 0, N_("The Edit->Join command will join points which are this close together\nA value of 0 means they must be coincident") },
 	{ N_("CopyMetaData"), pr_bool, &copymetadata, NULL, NULL, '\0', NULL, 0, N_("When copying glyphs from the font view, also copy the\nglyphs' metadata (name, encoding, comment, etc).") },
 	{ N_("UndoDepth"), pr_int, &maxundoes, NULL, NULL, '\0', NULL, 0, N_("The maximum number of Undoes/Redoes stored in a glyph. Use -1 for infinite Undoes\n(but watch RAM consumption and use the Edit menu's Remove Undoes as needed)") },
 	{ N_("UpdateFlex"), pr_bool, &updateflex, NULL, NULL, '\0', NULL, 0, N_("Figure out flex hints after every change") },
 	{ N_("AutoKernDialog"), pr_bool, &default_autokern_dlg, NULL, NULL, '\0', NULL, 0, N_("Open AutoKern dialog for new kerning subtables") },
 	{ N_("MetricsShiftSkip"), pr_int, &pref_mv_shift_and_arrow_skip, NULL, NULL, '\0', NULL, 0, N_("Number of units to increment/decrement a table value by in the metrics window when shift is held") },
 	{ N_("MetricsControlShiftSkip"), pr_int, &pref_mv_control_shift_and_arrow_skip, NULL, NULL, '\0', NULL, 0, N_("Number of units to increment/decrement a table value by in the metrics window when both control and shift is held") },
+	PREFS_LIST_EMPTY
+},
+  editing_interface_list[] = {
+	{ N_("ArrowMoveSize"), pr_real, &arrowAmount, NULL, NULL, '\0', NULL, 0, N_("The number of em-units by which an arrow key will move a selected point") },
+	{ N_("ArrowAccelFactor"), pr_real, &arrowAccelFactor, NULL, NULL, '\0', NULL, 0, N_("Holding down the Shift key will speed up arrow key motion by this factor") },
+	{ N_("DrawOpenPathsWithHighlight"), pr_bool, &DrawOpenPathsWithHighlight, NULL, NULL, '\0', NULL, 0, N_("Open paths should be drawn in a special highlight color to make them more apparent.") },
+	{ N_("MeasureToolShowHorizontalVertical"), pr_bool, &measuretoolshowhorizontolvertical, NULL, NULL, '\0', NULL, 0, N_("Have the measure tool show horizontal and vertical distances on the canvas.") },
 	{ N_("EditHandleSize"), pr_real, &prefs_cvEditHandleSize, NULL, NULL, '\0', NULL, 0, N_("The size of the handles showing control points and other interesting points in the glyph editor (default is 5).") },
 	{ N_("InactiveHandleAlpha"), pr_int, &prefs_cvInactiveHandleAlpha, NULL, NULL, '\0', NULL, 0, N_("Inactive handles in the glyph editor will be drawn with this alpha value (range: 0-255 default is 255).") },
 	{ N_("ShowControlPointsAlways"), pr_bool, &prefs_cv_show_control_points_always_initially, NULL, NULL, '\0', NULL, 0, N_("Always show the control points when editing a glyph.\nThis can be turned off in the menu View/Show, this setting will effect if control points are shown initially.\nChange requires a restart of fontforge.") },
 	{ N_("ShowFillWithSpace"), pr_bool, &cv_show_fill_with_space, NULL, NULL, '\0', NULL, 0, N_("Also enable preview mode when the space bar is pressed.") },
 	{ N_("OutlineThickness"), pr_int, &prefs_cv_outline_thickness, NULL, NULL, '\0', NULL, 0, N_("Setting above 1 will cause a thick outline to be drawn for glyph paths\n which is only extended inwards from the edge of the glyph.\n See also the ForegroundThickOutlineColor Resource for the color of this outline.") },
-
-    
 	PREFS_LIST_EMPTY
 },
   sync_list[] = {
@@ -400,6 +406,9 @@ static struct prefs_list {
  generate_list[] = {
 	{ N_("AskBDFResolution"), pr_bool, &ask_user_for_resolution, NULL, NULL, 'B', NULL, 0, N_("When generating a set of BDF fonts ask the user\nto specify the screen resolution of the fonts\notherwise FontForge will guess depending on the pixel size.") },
 	{ N_("AutoHint"), pr_bool, &autohint_before_generate, NULL, NULL, 'H', NULL, 0, N_("AutoHint changed glyphs before generating a font") },
+#ifndef _NO_LIBPNG
+    { N_("WritePNGInSFD"), pr_bool, &WritePNGInSFD, NULL, NULL, 'B', NULL, 0, N_("If your SFD contains images, write them as PNG; this results in smaller SFDs; but was not supported in FontForge versions compiled before July 2019, so older FontForge versions cannot read them.") },
+#endif
 
 	{ N_("GenerateHintWidthEqualityTolerance"), pr_real, &GenerateHintWidthEqualityTolerance, NULL, NULL, '\0', NULL, 0, N_( "When generating a font, ignore slight rounding errors for hints that should be at the top or bottom of the glyph. For example, you might like to set this to 0.02 so that 19.999 will be considered 20. But only for the hint width value.") },
 	
@@ -424,11 +433,6 @@ static struct prefs_list {
 },
  opentype_list[] = {
 	{ N_("UseNewIndicScripts"), pr_bool, &use_second_indic_scripts, NULL, NULL, 'C', NULL, 0, N_("MS has changed (in August 2006) the inner workings of their Indic shaping\nengine, and to disambiguate this change has created a parallel set of script\ntags (generally ending in '2') for Indic writing systems. If you are working\nwith the new system set this flag, if you are working with the old unset it.\n(if you aren't doing Indic work, this flag is irrelevant).") },
-	PREFS_LIST_EMPTY
-},
- collab_list[] = {
-	{ N_("SessionJoinTimeout"), pr_int, &pref_collab_sessionJoinTimeoutMS, NULL, NULL, 'C', NULL, 0, N_("The number of milliseconds to wait for a connection to the collaboration server to happen. FontForge may be unresponsive during this session connection time. (default 1000 which is 1 second)") },
-	{ N_("RoundTripMessageMaxTime"), pr_int, &pref_collab_roundTripTimerMS, NULL, NULL, 'C', NULL, 0, N_("The number of milliseconds that are allowed to pass between sending an update to the server and hearing it sent back as a message to all clients. The FontForge user interface may be unresponsive during this time. A change requires a restart of FontForge. (default 2000 which is 2 seconds)") },
 	PREFS_LIST_EMPTY
 },
 /* These are hidden, so will never appear in preference ui, hence, no "N_(" */
@@ -509,7 +513,6 @@ static struct prefs_list {
 	{ "DefaultBVWidth", pr_int, &bv_width, NULL, NULL, '\0', NULL, 1, NULL },
 	{ "DefaultBVHeight", pr_int, &bv_height, NULL, NULL, '\0', NULL, 1, NULL },
 	{ "AnchorControlPixelSize", pr_int, &aa_pixelsize, NULL, NULL, '\0', NULL, 1, NULL },
-	{ "CollabLastServerConnectedTo", pr_string, &pref_collab_last_server_connected_to, NULL, NULL, '\0', NULL, 1, NULL },
 #ifdef _NO_LIBCAIRO
 	{ "UseCairoDrawing", pr_bool, &prefs_usecairo, NULL, NULL, '\0', NULL, 0, N_("Use the cairo library for drawing (if available)\nThis makes for prettier (anti-aliased) but slower drawing\nThis applies to any windows created AFTER this is set.\nAlready existing windows will continue as they are.") },
 #endif
@@ -531,11 +534,9 @@ static struct prefs_list {
 	{ "DefaultOTFflags", pr_int, &old_otf_flags, NULL, NULL, '\0', NULL, 1, NULL },
 	PREFS_LIST_EMPTY
 },
- *prefs_list[] = { general_list, new_list, open_list, navigation_list, sync_list, editing_list, accent_list, args_list, fontinfo_list, generate_list, tt_list, opentype_list, hints_list, instrs_list,
- collab_list,
+ *prefs_list[] = { general_list, new_list, open_list, navigation_list, sync_list, editing_list, editing_interface_list, accent_list, args_list, fontinfo_list, generate_list, tt_list, opentype_list, hints_list, instrs_list,
  hidden_list, NULL },
- *load_prefs_list[] = { general_list, new_list, open_list, navigation_list, sync_list, editing_list, accent_list, args_list, fontinfo_list, generate_list, tt_list, opentype_list, hints_list, instrs_list,
- collab_list,
+ *load_prefs_list[] = { general_list, new_list, open_list, navigation_list, sync_list, editing_list, editing_interface_list, accent_list, args_list, fontinfo_list, generate_list, tt_list, opentype_list, hints_list, instrs_list,
  hidden_list, oldnames, NULL };
 
 struct visible_prefs_list { char *tab_name; int nest; struct prefs_list *pl; } visible_prefs_list[] = {
@@ -544,6 +545,7 @@ struct visible_prefs_list { char *tab_name; int nest; struct prefs_list *pl; } v
     { N_("Open Font"), 0, open_list},
     { N_("Navigation"), 0, navigation_list},
     { N_("Editing"), 0, editing_list},
+    { N_("Interface"), 1, editing_interface_list},
     { N_("Synchronize"), 1, sync_list},
     { N_("TT"), 1, tt_list},
     { N_("Accents"), 1, accent_list},
@@ -553,9 +555,6 @@ struct visible_prefs_list { char *tab_name; int nest; struct prefs_list *pl; } v
     { N_("PS Hints"), 1, hints_list},
     { N_("TT Instrs"), 1, instrs_list},
     { N_("OpenType"), 1, opentype_list},
-#ifdef BUILD_COLLAB
-    { N_("Collaboration"), 0, collab_list},
-#endif
     { NULL, 0, NULL }
 };
 
@@ -581,11 +580,10 @@ static void ProcessFileChooserPrefs(void) {
 	b[i++] = uc_copy("/System/Library/Fonts/");
 #endif
 #if __CygWin
-	b[i++] = uc_copy("/cygdrive/c/Windows/Fonts/");
-#endif
+	b[i++] = uc_copy("/usr/share/fonts/");
+	b[i++] = uc_copy("/usr/share/X11/fonts/");
+#else
 	b[i++] = uc_copy("/usr/X11R6/lib/X11/fonts/");
-#ifndef __CygWin		/* I'm not releasing ftp support on cygwin */
-	b[i++] = uc_copy("ftp://ctan.org/pub/tex-archive/fonts/");
 #endif
 	b[i++] = NULL;
 	GFileChooserSetBookmarks(b);
@@ -787,54 +785,16 @@ static char *getPfaEditPrefs(void) {
 }
 
 static char *PrefsUI_getFontForgeShareDir(void) {
-    static char *sharedir=NULL;
-    static int set=false;
-    char *pt;
-    int len;
-
-    if ( set )
-return( sharedir );
-
-    set = true;
-
-#if defined(__MINGW32__)
-
-    len = strlen(GResourceProgramDir) + strlen("/share/fontforge") +1;
-    sharedir = malloc(len);
-    strcpy(sharedir, GResourceProgramDir);
-    strcat(sharedir, "/share/fontforge");
-    return sharedir;
-
-#else
-
-    pt = strstr(GResourceProgramDir,"/bin");
-    if ( pt==NULL ) {
-#if defined(SHAREDIR)
-	sharedir = copy(SHAREDIR "/fontforge" );
-return( sharedir );
-#elif defined(PREFIX)
-	sharedir = copy( PREFIX "/share/fontforge" );
-return( sharedir );
-#else
-return( NULL );
-#endif
-    }
-    len = (pt-GResourceProgramDir)+strlen("/share/fontforge")+1;
-    sharedir = malloc(len);
-    strncpy(sharedir,GResourceProgramDir,pt-GResourceProgramDir);
-    strcpy(sharedir+(pt-GResourceProgramDir),"/share/fontforge");
-return( sharedir );
-
-#endif
+    return getShareDir();
 }
 
-#  include <charset.h>		/* we still need the charsets & encoding to set local_encoding */
 static int encmatch(const char *enc,int subok) {
     static struct { char *name; int enc; } encs[] = {
 	{ "US-ASCII", e_usascii },
 	{ "ASCII", e_usascii },
 	{ "ISO646-NO", e_iso646_no },
 	{ "ISO646-SE", e_iso646_se },
+	{ "LATIN10", e_iso8859_16 },
 	{ "LATIN1", e_iso8859_1 },
 	{ "ISO-8859-1", e_iso8859_1 },
 	{ "ISO-8859-2", e_iso8859_2 },
@@ -850,6 +810,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO-8859-13", e_iso8859_13 },
 	{ "ISO-8859-14", e_iso8859_14 },
 	{ "ISO-8859-15", e_iso8859_15 },
+	{ "ISO-8859-16", e_iso8859_16 },
 	{ "ISO_8859-1", e_iso8859_1 },
 	{ "ISO_8859-2", e_iso8859_2 },
 	{ "ISO_8859-3", e_iso8859_3 },
@@ -864,6 +825,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO_8859-13", e_iso8859_13 },
 	{ "ISO_8859-14", e_iso8859_14 },
 	{ "ISO_8859-15", e_iso8859_15 },
+	{ "ISO_8859-16", e_iso8859_16 },
 	{ "ISO8859-1", e_iso8859_1 },
 	{ "ISO8859-2", e_iso8859_2 },
 	{ "ISO8859-3", e_iso8859_3 },
@@ -878,6 +840,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO8859-13", e_iso8859_13 },
 	{ "ISO8859-14", e_iso8859_14 },
 	{ "ISO8859-15", e_iso8859_15 },
+	{ "ISO8859-16", e_iso8859_16 },
 	{ "ISO88591", e_iso8859_1 },
 	{ "ISO88592", e_iso8859_2 },
 	{ "ISO88593", e_iso8859_3 },
@@ -892,6 +855,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO885913", e_iso8859_13 },
 	{ "ISO885914", e_iso8859_14 },
 	{ "ISO885915", e_iso8859_15 },
+	{ "ISO885916", e_iso8859_16 },
 	{ "8859_1", e_iso8859_1 },
 	{ "8859_2", e_iso8859_2 },
 	{ "8859_3", e_iso8859_3 },
@@ -906,6 +870,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "8859_13", e_iso8859_13 },
 	{ "8859_14", e_iso8859_14 },
 	{ "8859_15", e_iso8859_15 },
+	{ "8859_16", e_iso8859_16 },
 	{ "KOI8-R", e_koi8_r },
 	{ "KOI8R", e_koi8_r },
 	{ "WINDOWS-1252", e_win },
@@ -933,7 +898,7 @@ static int encmatch(const char *enc,int subok) {
 
     int i;
     char buffer[80];
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     static char *last_complaint;
 
     iconv_t test;
@@ -956,7 +921,7 @@ return( encs[i].enc );
 	    if ( strstrmatch(enc,encs[i].name)!=NULL )
 return( encs[i].enc );
 
-#if HAVE_ICONV
+#if HAVE_ICONV_H
 	/* I only try to use iconv if the encoding doesn't match one I support*/
 	/*  loading iconv unicode data takes a while */
 	test = iconv_open(enc,FindUnicharName());
@@ -1195,7 +1160,6 @@ static void PrefsUI_LoadPrefs(void)
     char *pt, *real_xdefs_filename = NULL;
     struct prefs_list *pl;
 
-    LoadPluginDir(NULL);
     LoadPfaEditEncodings();
     LoadGroupList();
 
@@ -1303,15 +1267,14 @@ static void PrefsUI_LoadPrefs(void)
     real_xdefs_filename = xdefs_filename;
     if ( !real_xdefs_filename )
     {
-	fprintf(stderr,"no xdefs_filename!\n");
-	if (!quiet) {
-	    fprintf(stderr,"TESTING: getPixmapDir:%s\n", getPixmapDir() );
-	    fprintf(stderr,"TESTING: getShareDir:%s\n", getShareDir() );
-	    fprintf(stderr,"TESTING: GResourceProgramDir:%s\n", GResourceProgramDir );
-	}
+//	fprintf(stderr,"no xdefs_filename!\n");
+//	if (!quiet) {
+//	    fprintf(stderr,"TESTING: getPixmapDir:%s\n", getPixmapDir() );
+//	    fprintf(stderr,"TESTING: getShareDir:%s\n", getShareDir() );
+//	}
 	snprintf(path, PATH_MAX, "%s/%s", getPixmapDir(), "resources" );
-	if (!quiet)
-	    fprintf(stderr,"trying default theme:%s\n", path );
+//	if (!quiet)
+//	    fprintf(stderr,"trying default theme:%s\n", path );
 	real_xdefs_filename = path;
     }
     GResourceAddResourceFile(real_xdefs_filename,GResourceProgramName,true);
@@ -1534,7 +1497,7 @@ static int set_e_h(GWindow gw, GEvent *event) {
 	sd->done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("prefs.html#Features");
+	    help("ui/dialogs/prefs.html", "#prefs-features");
 return( true );
 	}
 return( false );
@@ -2004,7 +1967,7 @@ static int e_h(GWindow gw, GEvent *event) {
 	}
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("prefs.html");
+	    help("ui/dialogs/prefs.html", NULL);
 return( true );
 	}
 return( false );
@@ -2171,20 +2134,20 @@ void DoPrefs(void) {
     slabel[sgc].text = (unichar_t *) _("Menu Name");
     slabel[sgc].text_is_1byte = true;
     sgcd[sgc].gd.label = &slabel[sgc];
-    sgcd[sgc].gd.popup_msg = (unichar_t *) _("You may create a script menu containing up to 10 frequently used scripts.\nEach entry in the menu needs both a name to display in the menu and\na script file to execute. The menu name may contain any unicode characters.\nThe button labeled \"...\" will allow you to browse for a script file.");
+    sgcd[sgc].gd.popup_msg = _("You may create a script menu containing up to 10 frequently used scripts.\nEach entry in the menu needs both a name to display in the menu and\na script file to execute. The menu name may contain any unicode characters.\nThe button labeled \"...\" will allow you to browse for a script file.");
     sgcd[sgc].gd.pos.x = 8;
     sgcd[sgc].gd.pos.y = y2;
-    sgcd[sgc].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    sgcd[sgc].gd.flags = gg_visible | gg_enabled;
     sgcd[sgc++].creator = GLabelCreate;
     sarray[si++] = &sgcd[sgc-1];
 
     slabel[sgc].text = (unichar_t *) _("Script File");
     slabel[sgc].text_is_1byte = true;
     sgcd[sgc].gd.label = &slabel[sgc];
-    sgcd[sgc].gd.popup_msg = (unichar_t *) _("You may create a script menu containing up to 10 frequently used scripts\nEach entry in the menu needs both a name to display in the menu and\na script file to execute. The menu name may contain any unicode characters.\nThe button labeled \"...\" will allow you to browse for a script file.");
+    sgcd[sgc].gd.popup_msg = _("You may create a script menu containing up to 10 frequently used scripts\nEach entry in the menu needs both a name to display in the menu and\na script file to execute. The menu name may contain any unicode characters.\nThe button labeled \"...\" will allow you to browse for a script file.");
     sgcd[sgc].gd.pos.x = 110;
     sgcd[sgc].gd.pos.y = y2;
-    sgcd[sgc].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    sgcd[sgc].gd.flags = gg_visible | gg_enabled;
     sgcd[sgc++].creator = GLabelCreate;
     sarray[si++] = &sgcd[sgc-1];
     sarray[si++] = GCD_Glue;
@@ -2259,20 +2222,20 @@ void DoPrefs(void) {
 	    plabel[gc].text_is_1byte = true;
 	    pgcd[gc].gd.label = &plabel[gc];
 	    pgcd[gc].gd.mnemonic = '\0';
-	    pgcd[gc].gd.popup_msg = (unichar_t *) _(pl->popup);
+	    pgcd[gc].gd.popup_msg = _(pl->popup);
 	    pgcd[gc].gd.pos.x = 8;
 	    pgcd[gc].gd.pos.y = y + 6;
-	    pgcd[gc].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	    pgcd[gc].gd.flags = gg_visible | gg_enabled;
 	    pgcd[gc++].creator = GLabelCreate;
 	    hvarray[si++] = &pgcd[gc-1];
 
 	    plabel[gc].text_is_1byte = true;
 	    pgcd[gc].gd.label = &plabel[gc];
 	    pgcd[gc].gd.mnemonic = '\0';
-	    pgcd[gc].gd.popup_msg = (unichar_t *) _(pl->popup);
+	    pgcd[gc].gd.popup_msg = _(pl->popup);
 	    pgcd[gc].gd.pos.x = 110;
 	    pgcd[gc].gd.pos.y = y;
-	    pgcd[gc].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	    pgcd[gc].gd.flags = gg_visible | gg_enabled;
 	    pgcd[gc].data = pl;
 	    pgcd[gc].gd.cid = k*CID_PrefsOffset+CID_PrefsBase+i;
 	    switch ( pl->type ) {
@@ -2677,6 +2640,7 @@ void DoXRes(void) {
 
     MVColInit();
     CVColInit();
+    BVColInit();
     GResEdit(&fontview_ri,xdefs_filename,change_res_filename);
 }
 
@@ -2776,8 +2740,8 @@ static void PrefsSubSetDlg(CharView *cv,char* windowTitle,struct prefs_list* pli
     GTabInfo aspects[TOPICS+5], subaspects[3];
     GGadgetCreateData **hvarray, boxes[2*TOPICS];
     struct pref_data p;
-    int line,line_max = 3;
-    int i = 0, gc = 0, ii, y, si=0, k=0;
+    int line = 0,line_max = 3;
+    int i = 0, gc = 0, ii, y=0, si=0, k=0;
     char buf[20];
     char *tempstr;
 
@@ -2834,20 +2798,20 @@ static void PrefsSubSetDlg(CharView *cv,char* windowTitle,struct prefs_list* pli
 	    plabel[gc].text_is_1byte = true;
 	    pgcd[gc].gd.label = &plabel[gc];
 	    pgcd[gc].gd.mnemonic = '\0';
-	    pgcd[gc].gd.popup_msg = (unichar_t *) 0;//_(pl->popup);
+	    pgcd[gc].gd.popup_msg = 0;//_(pl->popup);
 	    pgcd[gc].gd.pos.x = 8;
 	    pgcd[gc].gd.pos.y = y + 6;
-	    pgcd[gc].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	    pgcd[gc].gd.flags = gg_visible | gg_enabled;
 	    pgcd[gc++].creator = GLabelCreate;
 	    hvarray[si++] = &pgcd[gc-1];
 
 	    plabel[gc].text_is_1byte = true;
 	    pgcd[gc].gd.label = &plabel[gc];
 	    pgcd[gc].gd.mnemonic = '\0';
-	    pgcd[gc].gd.popup_msg = (unichar_t *) 0;//_(pl->popup);
+	    pgcd[gc].gd.popup_msg = 0;//_(pl->popup);
 	    pgcd[gc].gd.pos.x = 110;
 	    pgcd[gc].gd.pos.y = y;
-	    pgcd[gc].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	    pgcd[gc].gd.flags = gg_visible | gg_enabled;
 	    pgcd[gc].data = pl;
 	    pgcd[gc].gd.cid = k*CID_PrefsOffset+CID_PrefsBase+i;
 	    switch ( pl->type ) {

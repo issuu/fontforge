@@ -24,13 +24,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdlib.h>
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
 #include "ggadgetP.h"
-#include "ustring.h"
 #include "gkeysym.h"
 #include "gresource.h"
 #include "gwidget.h"
+#include "ustring.h"
 
 static void GListButtonDoPopup(GListButton *);
 
@@ -547,9 +549,12 @@ return;
     if ( b->labeltype==2 ) {
 	GListButton *glb = (GListButton *) g;
 	if ( glb->popup ) {
-	    GDrawDestroyWindow(glb->popup);
-	    GDrawSync(NULL);
-	    GDrawProcessWindowEvents(glb->popup);	/* popup's destroy routine must execute before we die */
+	    /* Must cleanup the popup before we die  */
+	    /* We do this instead of GDrawDestroyWindow because this method is synchronous */
+	    GEvent die;
+	    die.type = et_close;
+	    die.w = glb->popup;
+	    GDrawPostEvent(&die);
 	}
 	GTextInfoArrayFree(glb->ti);
     }

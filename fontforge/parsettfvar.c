@@ -24,14 +24,24 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "parsettfvar.h"
+
+#include "chardata.h"
 #include "fontforge.h"
-#include <chardata.h>
-#include <utype.h>
-#include <ustring.h>
-#include <math.h>
-#include <locale.h>
-#include <gwidget.h>
+#include "fvfonts.h"
+#include "gwidget.h"
+#include "mem.h"
+#include "parsettf.h"
+#include "splineutil.h"
 #include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
+#include <math.h>
 
 /***************************************************************************/
 /*                                                                         */
@@ -737,6 +747,7 @@ return;
 		    if ( j==info->variations->axis_count )
 		break;
 		}
+                free(coords);
 		ti = -1;
 		if ( k!=info->variations->tuple_count )
 		    ti = k;

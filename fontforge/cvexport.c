@@ -24,17 +24,49 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvexport.h"
+
+#include "autohint.h"
+#include "bvedit.h"
+#include "dumppfa.h"
 #include "fontforgevw.h"
-#include <math.h>
-#include <locale.h>
-#include <string.h>
 #include "gfile.h"
-#include <time.h>
-#include "ustring.h"
-#include "gio.h"
 #include "gicons.h"
+#include "gio.h"
+#include "gutils.h"
 #include "print.h"	/* For pdf output routines */
-#include <utype.h>
+#include "spiro.h"
+#include "splinefill.h"
+#include "splineutil.h"
+#include "svg.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <assert.h>
+#include <locale.h>
+#include <math.h>
+#include <string.h>
+#include <time.h>
+
+void InitExportParams(ExportParams *ep) {
+    assert( ep!=NULL );
+
+    memset(ep, 0, sizeof(ExportParams));
+
+    ep->initialized = true;
+}
+
+ExportParams *ExportParamsState() {
+    static ExportParams eps;
+
+    if ( !eps.initialized )
+	InitExportParams(&eps);
+
+    return &eps;
+}
 
 static void EpsGeneratePreview(FILE *eps,SplineChar *sc,int layer,DBounds *b) {
     double scale, temp;
@@ -90,8 +122,12 @@ int _ExportEPS(FILE *eps,SplineChar *sc, int layer, int preview) {
     fprintf( eps, "%%%%Creator: FontForge\n" );
     if ( author!=NULL )
 	fprintf( eps, "%%%%Author: %s\n", author);
-    time(&now);
-    tm = localtime(&now);
+    now = GetTime();
+    if (!getenv("SOURCE_DATE_EPOCH")) {
+	tm = localtime(&now);
+    } else {
+	tm = gmtime(&now);
+    }
     fprintf( eps, "%%%%CreationDate: %d:%02d %d-%d-%d\n", tm->tm_hour, tm->tm_min,
 	    tm->tm_mday, tm->tm_mon+1, 1900+tm->tm_year );
     if ( sc->parent->multilayer ) {
@@ -147,7 +183,8 @@ int _ExportPDF(FILE *pdf,SplineChar *sc,int layer) {
 /* TODO: Note, maybe this routine can be combined with print.c dump_pdfprologue() */
     DBounds b;
     time_t now;
-    struct tm *tm;
+    GDateTime *gdt;
+    GTimeSpan zoffset;
     int ret;
     char oldloc[24];
     int _objlocs[8], xrefloc, streamstart, streamlength, resid = 0, nextobj;
@@ -208,25 +245,28 @@ int _ExportPDF(FILE *pdf,SplineChar *sc,int layer) {
     fprintf( pdf, "6 0 obj\n" );
     fprintf( pdf, " <<\n" );
     fprintf( pdf, "    /Creator (FontForge)\n" );
-    time(&now);
-    tm = localtime(&now);
+    now = GetTime();
+    if (!getenv("SOURCE_DATE_EPOCH")) {
+	gdt = g_date_time_new_from_unix_local((gint64)now);
+    } else {
+	gdt = g_date_time_new_from_unix_utc((gint64)now);
+    }
     fprintf( pdf, "    /CreationDate (D:%04d%02d%02d%02d%02d%02d",
-	    1900+tm->tm_year, tm->tm_mon+1, tm->tm_mday,
-	    tm->tm_hour, tm->tm_min, tm->tm_sec );
-#ifdef _NO_TZSET
-    fprintf( pdf, "Z)\n" );
-#else
-    tzset();
-    if ( timezone==0 )
+	    g_date_time_get_year(gdt), g_date_time_get_month(gdt), g_date_time_get_day_of_month(gdt),
+	    g_date_time_get_hour(gdt), g_date_time_get_minute(gdt), g_date_time_get_second(gdt) );
+    zoffset = g_date_time_get_utc_offset(gdt)/1000000;
+    if ( zoffset==0 || getenv("SOURCE_DATE_EPOCH") )
 	fprintf( pdf, "Z)\n" );
     else {
-	if ( timezone<0 ) /* fprintf bug - this is a kludge to print +/- in front of a %02d-padded value */
+	if ( zoffset<0 ) { /* fprintf bug - this is a kludge to print +/- in front of a %02d-padded value */
 	    fprintf( pdf, "-" );
-	else
+	    zoffset *= -1;
+	} else
 	    fprintf( pdf, "+" );
-	fprintf( pdf, "%02d'%02d')\n", (int)(timezone/3600),(int)(timezone/60-(timezone/3600)*60) );
+	fprintf( pdf, "%02d'%02d')\n", (int)(zoffset/3600),(int)(zoffset/60-(zoffset/3600)*60) );
     }
-#endif
+    g_date_time_unref(gdt);
+    gdt = NULL;
     fprintf( pdf, "    /Title (%s from %s)\n", sc->name, sc->parent->fontname );
     if ( author!=NULL )
 	fprintf( pdf, "    /Author (%s)\n", author );
@@ -345,7 +385,7 @@ return(0);
 return( ret );
 }
 
-int ExportSVG(char *filename,SplineChar *sc,int layer) {
+int ExportSVG(char *filename,SplineChar *sc,int layer, ExportParams *ep) {
     FILE *svg;
     int ret;
 
@@ -353,12 +393,12 @@ int ExportSVG(char *filename,SplineChar *sc,int layer) {
     if ( svg==NULL ) {
 return(0);
     }
-    ret = _ExportSVG(svg,sc,layer);
+    ret = _ExportSVG(svg,sc,layer,ep);
     fclose(svg);
 return( ret );
 }
 
-int ExportGlif(char *filename,SplineChar *sc,int layer) {
+int ExportGlif(char *filename,SplineChar *sc,int layer,int version) {
     FILE *glif;
     int ret;
 
@@ -366,7 +406,7 @@ int ExportGlif(char *filename,SplineChar *sc,int layer) {
     if ( glif==NULL ) {
 return(0);
     }
-    ret = _ExportGlif(glif,sc,layer);
+    ret = _ExportGlif(glif,sc,layer,version);
 return( ret );
 }
 
@@ -697,7 +737,7 @@ static void MakeExportName(char *buffer, int blen,char *format_spec,
 }
 
 void ScriptExport(SplineFont *sf, BDFFont *bdf, int format, int gid,
-	char *format_spec,EncMap *map) {
+                  char *format_spec,EncMap *map,ExportParams *ep) {
     char buffer[100];
     SplineChar *sc = sf->glyphs[gid];
     BDFChar *bc = bdf!=NULL ? bdf->glyphs[gid] : NULL;
@@ -713,9 +753,9 @@ return;
     else if ( format==1 )
 	good = ExportFig(buffer,sc,ly_fore);
     else if ( format==2 )
-	good = ExportSVG(buffer,sc,ly_fore);
+	good = ExportSVG(buffer,sc,ly_fore,ep);
     else if ( format==3 )
-	good = ExportGlif(buffer,sc,ly_fore);
+	good = ExportGlif(buffer,sc,ly_fore,3);
     else if ( format==4 )
 	good = ExportPDF(buffer,sc,ly_fore);
     else if ( format==5 )

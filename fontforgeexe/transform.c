@@ -25,10 +25,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "bvedit.h"
 #include "fontforgeui.h"
-#include <math.h>
+#include "gkeysym.h"
 #include "ustring.h"
-#include <gkeysym.h>
+
+#include <math.h>
 
 #define TCnt	3
 
@@ -175,7 +180,7 @@ static int Trans_OK(GGadget *g, GEvent *e) {
 		    else if ( angle==180 ) bvts[bvpos++].func = bvt_rotate180;
 		    else if ( angle==270 ) bvts[bvpos++].func = bvt_rotate90cw;
 		}
-		angle *= 3.1415926535897932/180;
+		angle *= FF_PI/180;
 		trans[0] = trans[3] = cos(angle);
 		trans[2] = -(trans[1] = sin(angle));
 	      break;
@@ -201,13 +206,13 @@ static int Trans_OK(GGadget *g, GEvent *e) {
 		angle = GetReal8(td->gw,CID_SkewAng+i*TBlock_CIDOffset,_("Skew Angle"),&err);
 		if ( GGadgetIsChecked( GWidgetGetControl(td->gw,CID_CounterClockwise+i*TBlock_CIDOffset)) )
 		    angle = -angle;
-		angle *= 3.1415926535897932/180;
+		angle *= FF_PI/180;
 		trans[2] = tan(angle);
 		skewselect(&bvts[bvpos],trans[2]); ++bvpos;
 	      break;
 	      case 7:		/* 3D rotate */
-		angle =  GetReal8(td->gw,CID_XAxis+i*TBlock_CIDOffset,_("Rotation about X Axis"),&err) * 3.1415926535897932/180;
-		angle2 = GetReal8(td->gw,CID_YAxis+i*TBlock_CIDOffset,_("Rotation about Y Axis"),&err) * 3.1415926535897932/180;
+		angle =  GetReal8(td->gw,CID_XAxis+i*TBlock_CIDOffset,_("Rotation about X Axis"),&err) * FF_PI/180;
+		angle2 = GetReal8(td->gw,CID_YAxis+i*TBlock_CIDOffset,_("Rotation about Y Axis"),&err) * FF_PI/180;
 		trans[0] = cos(angle2);
 		trans[3] = cos(angle );
 		bvts[0].func = bvt_none;		/* Bad trans=> No trans */
@@ -295,7 +300,7 @@ static int Trans_TypeChange(GGadget *g, GEvent *e) {
 		uc_strcpy(ubuf,buf);
 		GGadgetSetTitle(GWidgetGetControl(bw,CID_YMove+offset), ubuf );
 	    } else {
-		sprintf( buf, "%.0f", atan2(yoff,xoff)*180/3.1415926535897932 );
+		sprintf( buf, "%.0f", atan2(yoff,xoff)*180/FF_PI );
 		uc_strcpy(ubuf,buf);
 		GGadgetSetTitle(GWidgetGetControl(bw,((mask&0x2)?CID_Angle:CID_SkewAng)+offset), ubuf );
 		GGadgetSetChecked(GWidgetGetControl(bw,CID_Clockwise+offset), false );
@@ -323,12 +328,12 @@ static int trans_e_h(GWindow gw, GEvent *event) {
     if ( event->type==et_close ) {
 	TransData *td = GDrawGetUserData(gw);
 	td->done = true;
-    } else if ( event->type == et_map ) {
+    } else if ( event->type == et_map && event->u.map.is_visible ) {
 	/* Above palettes */
 	GDrawRaise(gw);
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("transform.html");
+	    help("ui/dialogs/transform.html", NULL);
 return( true );
 	}
 return( false );

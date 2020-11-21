@@ -24,10 +24,12 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GIO_H
-#define _GIO_H
 
-#include <basics.h>
+#ifndef FONTFORGE_GIO_H
+#define FONTFORGE_GIO_H
+
+#include "basics.h"
+
 #include <time.h>
 
 enum giofuncs { gf_dir, gf_statfile, gf_getfile, gf_putfile,
@@ -40,8 +42,6 @@ typedef struct giocontrol {
     unichar_t *origpath;		/* what the user asked for (before any redirects), NULL if path doesn't change */
     unichar_t *topath;			/* for renames and copies */
     void *userdata;
-    struct gio_connectiondata *connectiondata;
-    struct gio_threaddata *threaddata;
     void *iodata;
     void (*receivedata)(struct giocontrol *);
     void (*receiveintermediate)(struct giocontrol *);
@@ -80,8 +80,6 @@ typedef struct gdirentry {
 extern void GIOdir(GIOControl *gc);
 extern void GIOstatFile(GIOControl *gc);
 extern void GIOfileExists(GIOControl *gc);
-extern void GIOgetFile(GIOControl *gc);
-extern void GIOputFile(GIOControl *gc);
 extern void GIOmkDir(GIOControl *gc);
 extern void GIOdelFile(GIOControl *gc);
 extern void GIOdelDir(GIOControl *gc);
@@ -95,16 +93,9 @@ extern void GIOclose(GIOControl *gc);
 extern GIOControl *GIOCreate(unichar_t *path,void *userdata,
 	void (*receivedata)(struct giocontrol *),
 	void (*receiveerror)(struct giocontrol *));
-extern void GIOSetDefAuthorizer(int32 (*getauth)(struct giocontrol *));
-extern void GIOSetUserAgent(unichar_t *agent);
 
-extern char *GIO_PasswordCache(char *proto,char *host,char *username,char *password);
-extern char *_GIO_decomposeURL(const unichar_t *url,char **host, int *port, char **username,
-	char **password);
-
-extern void GIO_SetThreadCallback(void (*callback)(void *,void *,void *));
 
 extern char *GIOguessMimeType(const char *path);
 extern char *GIOGetMimeType(const char *path);
 
-#endif
+#endif /* FONTFORGE_GIO_H */

@@ -24,15 +24,24 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <math.h>
-#include <ustring.h>
-#include <utype.h>
 
-#define DENOM_FACTOR_OF_EMSIZE	50.0
+#include <fontforge-config.h>
 
 #include "autowidth2.h"
+
+#include "cvundoes.h"
 #include "edgelist2.h"
+#include "fontforgevw.h"
+#include "fvfonts.h"
+#include "splineoverlap.h"
+#include "splineutil.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
+
+#define DENOM_FACTOR_OF_EMSIZE	50.0
 
 static int aw2_bbox_separation(AW_Glyph *g1, AW_Glyph *g2, AW_Data *all) {
     int j;
@@ -125,7 +134,7 @@ static void aw2_figure_all_sidebearing(AW_Data *all) {
     AW_Glyph *me, *other;
     real transform[6], half;
     int width, changed;
-    uint8 *rsel = calloc(all->fv->map->enccount,sizeof(char));
+    uint8 *rsel = calloc(all->fv->map->enccount,sizeof(uint8));
     real denom = (all->sf->ascent + all->sf->descent)/DENOM_FACTOR_OF_EMSIZE;
     int ldiff, rdiff;
 
@@ -439,7 +448,7 @@ SplineChar ***GlyphClassesFromNames(SplineFont *sf,char **classnames,
 	    else
 		classes[i] = malloc((clen+1)*sizeof(SplineChar *));
 	}
-	if ( cn != NULL ) free( cn ) ; cn = NULL ;
+	if ( cn != NULL ) { free( cn ) ; cn = NULL ; }
     }
 return( classes );
 }

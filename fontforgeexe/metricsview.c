@@ -25,24 +25,40 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgeui.h"
-#include "lookups.h"
-#include <gkeysym.h>
-#include <gresource.h>
-#include <gresedit.h>
-#include <string.h>
-#include <ustring.h>
-#include <utype.h>
-#include <math.h>
-#include <stdio.h>
 
-#include "collabclientui.h"
+#include <fontforge-config.h>
+
+#include "autotrace.h"
+#include "autowidth.h"
+#include "bitmapchar.h"
+#include "bvedit.h"
+#include "cvundoes.h"
+#include "fontforgeui.h"
+#include "fvcomposite.h"
+#include "fvfonts.h"
 #include "gfile.h"
+#include "gkeysym.h"
+#include "gresedit.h"
+#include "gresource.h"
+#include "lookups.h"
+#include "mm.h"
+#include "splinefill.h"
+#include "splineoverlap.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
 #include "wordlistparser.h"
+
+#include <math.h>
+
 extern char* SFDCreateUndoForLookup( SplineFont *sf, int lookup_type ) ;
 
 
 int mv_width = 800, mv_height = 300;
+// Maximum number of characters to transfer from CharView to MetricsView
+int fvmv_selectmax = 15;
 int mvshowgrid = mv_hidegrid;
 int mv_type = mv_widthonly;
 static int mv_antialias = true;
@@ -154,7 +170,7 @@ static SplineChar* getSelectedChar( MetricsView* mv ) {
 
 static void selectUserChosenWordListGlyphs( MetricsView *mv, void* userdata )
 {
-    printf("selectUserChosenWordListGlyphs(top)\n");
+//    printf("selectUserChosenWordListGlyphs(top)\n");
     MVSelectSetForAll( mv, 0 );
     // The previous check thought that userdata was in integer and wanted to verify that
     // it was positive and not equal to -1 or to -2. Frank changed it.
@@ -333,7 +349,7 @@ static void MVSubExpose(MetricsView *mv, GWindow pixmap, GEvent *event) {
     GClut clut;
     int si;
     double iscale = mv->pixelsize_set_by_window ? 1.0 : mv_scales[mv->scale_index];
-    double s = sin(-mv->sf->italicangle*3.1415926535897932/180.);
+    double s = sin(-mv->sf->italicangle*FF_PI/180.);
     int x_iaoffh = 0, x_iaoffl = 0;
 
     clip = &event->u.expose.rect;
@@ -1125,27 +1141,6 @@ static real GGadgetToReal(GGadget *g)
     return val;
 }
 
-static void MV_handle_collabclient_maybeSnapshot( MetricsView *mv, SplineChar *sc ) {
-    if ( collabclient_inSessionFV(&mv->fv->b) ) {
-	int dohints = 0;
-	SCPreserveState( sc, dohints );
-    }
-}
-
-
-/* If we are in a collab session, then send the redo through */
-/* to the server to update other clients to our state.	     */
-static void MV_handle_collabclient_sendRedo( MetricsView *mv, SplineChar *sc ) {
-    if( collabclient_inSessionFV( &mv->fv->b ) ) {
-	collabclient_sendRedo_SC( sc, UNDO_LAYER_UNKNOWN );
-
-	/* CharViewBase* cv = sc->views; */
-	/* if( !cv ) */
-	/*     cv = CharViewCreate( sc, mv->fv, -1 ); */
-	/* collabclient_sendRedo( cv ); */
-    }
-}
-
 static int MV_WidthChanged(GGadget *g, GEvent *e) {
 /* This routines called during "Advanced Width Metrics" viewing */
 /* any time "Width" changed or screen is updated		*/
@@ -1164,12 +1159,7 @@ return( true );
 	if (!isValidInt(end))
 	    GDrawBeep(NULL);
 	else if ( !mv->vertical && val!=sc->width ) {
-//	    dumpUndoChain( "before SCPreserveWidth...", sc, &sc->layers[ly_fore].undoes );
 	    SCPreserveWidth(sc);
-	    if( collabclient_inSessionFV( &mv->fv->b ) ) {
-		int dohints = 0;
-		SCPreserveState( sc, dohints );
-	    }
 
 	    // set i to the correct column that has the active width gadget
 	    for ( i=0; i<mv->glyphcnt; ++i ) {
@@ -1191,8 +1181,6 @@ return( true );
 
 	    SCSynchronizeWidth(sc,val,sc->width,NULL);
 	    SCCharChangedUpdate(sc,ly_none);
-	    printf("mv_widthChanged() sending collab\n");
-	    MV_handle_collabclient_sendRedo(mv,sc);
 
 	} else if ( mv->vertical && val!=sc->vwidth ) {
 	    SCPreserveVWidth(sc);
@@ -1230,18 +1218,11 @@ return( true );
 	if (!isValidInt(end))
 	    GDrawBeep(NULL);
 	else if ( !mv->vertical && val!=bb.minx ) {
-	    if ( collabclient_inSessionFV(&mv->fv->b) ) {
-		int dohints = 0;
-		SCPreserveState( sc, dohints );
-	    }
 	    real transform[6];
 	    transform[0] = transform[3] = 1.0;
 	    transform[1] = transform[2] = transform[5] = 0;
 	    transform[4] = val-bb.minx;
 	    FVTrans( (FontViewBase *)mv->fv,sc,transform,NULL,0 | fvt_alllayers );
-
-//	    dumpUndoChain( "LBearing Changed...e", sc, &sc->layers[ly_fore].undoes );
-	    MV_handle_collabclient_sendRedo(mv,sc);
 	} else if ( mv->vertical && val!=sc->parent->ascent-bb.maxy ) {
 	    real transform[6];
 	    transform[0] = transform[3] = 1.0;
@@ -1285,10 +1266,6 @@ return( true );
 	    /* Width is an integer. Adjust the lbearing so that the rbearing */
 	    /*  remains what was just typed in */
 	    if ( newwidth!=bb.maxx+val ) {
-		if ( collabclient_inSessionFV(&mv->fv->b) ) {
-		    int dohints = 0;
-		    SCPreserveState( sc, dohints );
-		}
 		real transform[6];
 		transform[0] = transform[3] = 1.0;
 		transform[1] = transform[2] = transform[5] = 0;
@@ -1297,9 +1274,6 @@ return( true );
 	    }
 	    SCSynchronizeWidth(sc,newwidth,sc->width,NULL);
 	    SCCharChangedUpdate(sc,ly_none);
-
-//	    dumpUndoChain( "RBearing Changed...2", sc, &sc->layers[ly_fore].undoes );
-	    MV_handle_collabclient_sendRedo(mv,sc);
 	} else if ( mv->vertical && val!=sc->vwidth-(sc->parent->ascent-bb.miny) ) {
 	    double vw = val+(sc->parent->ascent-bb.miny);
 	    SCPreserveWidth(sc);
@@ -1570,15 +1544,25 @@ static int MV_KernChanged(GGadget *g, GEvent *e) {
 return( true );
     if ( which>mv->glyphcnt-1 || which==0 )
 return( true );
-    if ( e->u.control.subtype == et_textchanged ) {
-	unichar_t *end;
-	int val = u_strtol(_GGadgetGetTitle(g),&end,10);
 
-	if ( *end && !(*end=='-' && end[1]=='\0'))
-	    GDrawBeep(NULL);
-	else {
-	    MV_ChangeKerning(mv,which,val, false);
-	}
+    if ( e->u.control.subtype == et_textchanged ) {
+        char* title = GGadgetGetTitle8(g);
+
+        int negatives = 0;
+        for (char* p = title; *p != '\0'; p++) {
+            if (*p == '-') negatives++;
+        }
+
+        char* new = str_replace_all(title, "-", "", true); // frees title
+        int val = strtol(new,NULL,10);
+        free(new);
+
+        if (negatives%2==1) {
+            val *= -1;
+        }
+
+        MV_ChangeKerning(mv,which,val, false);
+        MVRemetric(mv);
     } else if ( e->u.control.subtype == et_textfocuschanged &&
 	    e->u.control.u.tf_focus.gained_focus ) {
 	for ( i=0 ; i<mv->glyphcnt; ++i )
@@ -2908,7 +2892,7 @@ static void _MVMenuBuildAccent(MetricsView *mv,int onlyaccents) {
     if ( i!=-1 ) {
 	SplineChar *sc = mv->glyphs[i].sc;
 	if ( SFIsSomethingBuildable(mv->sf,sc,mv->layer,onlyaccents) )
-	    SCBuildComposit(mv->sf,sc,mv->layer,NULL,onlycopydisplayed);
+	    SCBuildComposit(mv->sf,sc,mv->layer,NULL,onlycopydisplayed,onlyaccents);
     }
 }
 
@@ -3124,24 +3108,21 @@ static void MVMenuRenderUsingHinting(GWindow gw, struct gmenuitem *UNUSED(mi), G
     GDrawRequestExpose(mv->v,NULL,false);
 }
 
-static void MVWindowTitle(char *buffer, int bufsize, MetricsView *mv) {
-
-    snprintf(buffer,bufsize,
-	    mv->type == mv_kernonly ?  _("Kerning Metrics For %.50s") :
-	    mv->type == mv_widthonly ? _("Advance Width Metrics For %.50s") :
-	                               _("Metrics For %.50s"),
-		  mv->sf->fontname);
+static char* MVWindowTitle(MetricsView *mv) {
+    return smprintf(mv->type == mv_kernonly ?  _("Kerning Metrics For %.50s") :
+	                mv->type == mv_widthonly ? _("Advance Width Metrics For %.50s") :
+	                                           _("Metrics For %.50s"), mv->sf->fontname);
 }
 
 static void MVMenuWindowType(GWindow gw, struct gmenuitem *mi, GEvent *UNUSED(e)) {
     MetricsView *mv = (MetricsView *) GDrawGetUserData(gw);
-    char buf[120];
 
     mv_type = mv->type = mi->mid==MID_KernOnly  ? mv_kernonly :
 			 mi->mid==MID_WidthOnly ? mv_widthonly :
 			 mv_kernwidth;
-    MVWindowTitle(buf, sizeof(buf), mv);
+    char* buf = MVWindowTitle(mv);
     GDrawSetWindowTitles8(mv->gw, buf, buf);
+    free(buf); // GGDKDrawSetWindowTitles8 does a copy
     GDrawRequestExpose(mv->v, NULL, false);
     GDrawRequestExpose(mv->gw, NULL, false);
 }
@@ -3536,7 +3517,7 @@ static GMenuItem2 fllist[] = {
     { { (unichar_t *) N_("Generate Mac _Family..."), (GImage *) "filegeneratefamily.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'F' }, H_("Generate Mac Family...|No Shortcut"), NULL, NULL, MVMenuGenerateFamily, 0 },
     { { (unichar_t *) N_("Generate TTC..."), (GImage *) "filegeneratefamily.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'F' }, H_("Generate TTC...|No Shortcut"), NULL, NULL, MVMenuGenerateTTC, 0 },
     { { NULL, NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 1, 0, 0, 0, '\0' }, NULL, NULL, NULL, NULL, 0 }, /* line */
-    { { (unichar_t *) N_("_Merge Feature Info..."), (GImage *) "filemergefeature.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'M' }, H_("Merge Kern Info...|No Shortcut"), NULL, NULL, MVMenuMergeKern, 0 },
+    { { (unichar_t *) N_("_Merge Feature Info..."), (GImage *) "filemergefeature.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'M' }, H_("Merge Feature Info...|No Shortcut"), NULL, NULL, MVMenuMergeKern, 0 },
     { { (unichar_t *) N_("Load _Word List..."), (GImage *) 0, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'M' }, H_("Load Word List...|No Shortcut"), NULL, NULL, MVMenuAddWordList, 0 },
     { { NULL, NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 1, 0, 0, 0, '\0' }, NULL, NULL, NULL, NULL, 0 }, /* line */
     { { (unichar_t *) N_("_Print..."), (GImage *) "fileprint.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'P' }, H_("Print...|No Shortcut"), NULL, NULL, MVMenuPrint, 0 },
@@ -3564,7 +3545,7 @@ static GMenuItem2 edlist[] = {
     { { (unichar_t *) N_("_Join"), (GImage *) "editjoin.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'J' }, H_("Join|No Shortcut"), NULL, NULL, MVMenuJoin, MID_Join },
     { { NULL, NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 1, 0, 0, 0, '\0' }, NULL, NULL, NULL, NULL, 0 }, /* line */
     { { (unichar_t *) N_("Select _All"), (GImage *) "editselect.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 1, 1, 0, 0, 0, 0, 1, 1, 0, 'A' }, H_("Select All|No Shortcut"), NULL, NULL, MVSelectAll, MID_SelAll },
-    { { (unichar_t *) N_("_Deselect All"), (GImage *) "menuempty.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'D' }, H_("Clear Selection|Escape"), NULL, NULL, MVClearSelection, MID_ClearSel },
+    { { (unichar_t *) N_("_Deselect All"), (GImage *) "menuempty.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'D' }, H_("Deselect All|Escape"), NULL, NULL, MVClearSelection, MID_ClearSel },
     { { NULL, NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 1, 0, 0, 0, '\0' }, NULL, NULL, NULL, NULL, 0 }, /* line */
     { { (unichar_t *) N_("U_nlink Reference"), (GImage *) "editunlink.png", COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 0, 0, 0, 0, 1, 1, 0, 'U' }, H_("Unlink Reference|No Shortcut"), NULL, NULL, MVUnlinkRef, MID_UnlinkRef },
     GMENUITEM2_EMPTY
@@ -3729,10 +3710,10 @@ static void lylistcheck(GWindow gw, struct gmenuitem *mi, GEvent *UNUSED(e)) {
 }
 
 static GMenuItem2 gdlist[] = {
-    { { (unichar_t *) N_("_Show"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Show Grid|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_ShowGrid },
-    { { (unichar_t *) N_("_Partial"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Partial Grid|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_PartialGrid },
-    { { (unichar_t *) N_("Hide when _Moving"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Hide Grid when Moving|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_HideGridWhenMoving },
-    { { (unichar_t *) N_("_Hide"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Hide Grid|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_HideGrid },
+    { { (unichar_t *) N_("_Show"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Show|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_ShowGrid },
+    { { (unichar_t *) N_("_Partial"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Partial|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_PartialGrid },
+    { { (unichar_t *) N_("Hide when _Moving"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Hide when Moving|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_HideGridWhenMoving },
+    { { (unichar_t *) N_("_Hide"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Hide|No Shortcut"), NULL, NULL, MVMenuShowGrid, MID_HideGrid },
     GMENUITEM2_EMPTY
 };
 
@@ -3799,12 +3780,12 @@ static GMenuItem2 vwlist[] = {
 };
 
 static void MVMenuContextualHelp(GWindow UNUSED(base), struct gmenuitem *UNUSED(mi), GEvent *UNUSED(e)) {
-    help("metricsview.html");
+    help("ui/mainviews/metricsview.html", NULL);
 }
 
 static GMenuItem2 tylist[] = {
     { { (unichar_t *) N_("_Kerning only"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'C' }, H_("Kerning only|No Shortcut"), NULL, NULL, MVMenuWindowType, MID_KernOnly },
-    { { (unichar_t *) N_("_Advance Width only"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'T' }, H_("Advance Width Only|No Shortcut"), NULL, NULL, MVMenuWindowType, MID_WidthOnly },
+    { { (unichar_t *) N_("_Advance Width only"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'T' }, H_("Advance Width only|No Shortcut"), NULL, NULL, MVMenuWindowType, MID_WidthOnly },
     { { (unichar_t *) N_("_Both"), NULL, COLOR_DEFAULT, COLOR_DEFAULT, NULL, NULL, 0, 1, 1, 0, 0, 0, 1, 1, 0, 'T' }, H_("Both|No Shortcut"), NULL, NULL, MVMenuWindowType, MID_BothKernWidth },
     GMENUITEM2_EMPTY
 };
@@ -3834,7 +3815,7 @@ static void MVMenuSetWidth(GWindow gw, struct gmenuitem *mi, GEvent *UNUSED(e)) 
     if ( mi->mid == MID_SetVWidth && !mv->sf->hasvmetrics )
 return;
     SplineChar* sc = getSelectedChar(mv);
-    printf("MVMenuSetWidth() sc:%p\n",sc);
+//    printf("MVMenuSetWidth() sc:%p\n",sc);
     if(!sc)
  	return;
 
@@ -4765,7 +4746,7 @@ return;
 	    // nothing
 	}
 
-	printf("mvsubmouse() mv->pressedwidth:%d \n", mv->pressedwidth );
+//	printf("mvsubmouse() mv->pressedwidth:%d \n", mv->pressedwidth );
 	mv->pressed = false;
 	mv->activeoff = 0;
 	sc = mv->glyphs[i].sc;
@@ -4773,12 +4754,11 @@ return;
 	    mv->pressedwidth = false;
 	    if ( mv->right_to_left ) diff = -diff;
 	    diff = diff*(mv->sf->ascent+mv->sf->descent)/(mv->pixelsize*iscale);
-	    printf("mvsubmouse() diff:%d \n", diff );
+//	    printf("mvsubmouse() diff:%d \n", diff );
 	    if ( diff!=0 ) {
 		SCPreserveWidth(sc);
 		SCSynchronizeWidth(sc,sc->width+diff,sc->width,NULL);
 		SCCharChangedUpdate(sc,ly_none);
-		MV_handle_collabclient_sendRedo(mv,sc);
 	    }
 	} else if ( mv->pressedkern ) {
 	    mv->pressedkern = false;
@@ -4789,8 +4769,6 @@ return;
 		MVRefreshValues(mv,i-1);
 	    }
 	} else if ( mv->type!=mv_kernonly ) {
-	    printf("mvsubmouse() not kern only \n" );
-	    MV_handle_collabclient_maybeSnapshot(mv,sc);
 	    real transform[6];
 	    transform[0] = transform[3] = 1.0;
 	    transform[1] = transform[2] = transform[5] = 0;
@@ -4798,8 +4776,6 @@ return;
 		    (mv->sf->ascent+mv->sf->descent)/(mv->pixelsize*iscale);
 	    if ( transform[4]!=0 )
 		FVTrans( (FontViewBase *)mv->fv,sc,transform,NULL, 0 | fvt_alllayers );
-
-	    MV_handle_collabclient_sendRedo(mv,sc);
 	}
 	mv->pressedwidth = false;
 	mv->pressedkern = false;
@@ -5213,8 +5189,12 @@ MetricsView *MetricsViewCreate(FontView *fv,SplineChar *sc,BDFFont *bdf) {
     FontRequest rq;
     static GWindow icon = NULL;
     extern int _GScrollBar_Width;
-    // Max. glyphname length: 31, max. chars picked up: 15. 31*15 = 465
-    char buf[465], *pt;
+    // The maximum length of a glyph's name is 31 chars:
+    // https://docs.microsoft.com/en-us/typography/opentype/spec/recom#post-table
+#define MAXGLYPHNAME_LEN 31
+    unsigned int selectmax = fvmv_selectmax < 0 ? fv->b.sf->glyphcnt : fvmv_selectmax;
+    char *buf = malloc(selectmax * (MAXGLYPHNAME_LEN + 1) + 1);
+    char *pt;
     GTextInfo label;
     int i,j,cnt;
     int as,ds,ld;
@@ -5243,13 +5223,14 @@ MetricsView *MetricsViewCreate(FontView *fv,SplineChar *sc,BDFFont *bdf) {
     wattrs.mask = wam_events|wam_cursor|wam_utf8_wtitle|wam_icon;
     wattrs.event_masks = ~(0);
     wattrs.cursor = ct_mypointer;
-    MVWindowTitle(buf,sizeof(buf),mv);
-    wattrs.utf8_window_title = buf;
+    char* titlebuf = MVWindowTitle(mv);
+    wattrs.utf8_window_title = titlebuf;
     wattrs.icon = icon;
     pos.x = pos.y = 0;
     pos.width = mv_width;
     pos.height = mv_height;
     mv->gw = gw = GDrawCreateTopWindow(NULL,&pos,mv_e_h,mv,&wattrs);
+    free(titlebuf);
     mv->width = pos.width; mv->height = pos.height;
     mv->gwgic = GDrawCreateInputContext(mv->gw,gic_root|gic_orlesser);
     GDrawSetGIC(gw,mv->gwgic,0,20);
@@ -5291,13 +5272,14 @@ MetricsView *MetricsViewCreate(FontView *fv,SplineChar *sc,BDFFont *bdf) {
     mv->fh = as+ds; mv->as = as;
 
     pt = buf;
-    mv->chars = calloc(mv->cmax=20,sizeof(SplineChar *));
+    // +1 because mv->chars is 0 terminated
+    mv->chars = calloc(mv->cmax=selectmax+1,sizeof(SplineChar *));
     if ( sc!=NULL ) {
 	mv->chars[mv->clen++] = sc;
     } else {
 	EncMap *map = fv->b.map;
-	for ( j=1; (j<=fv->sel_index || j<1) && mv->clen<15; ++j ) {
-	    for ( i=0; i<map->enccount && mv->clen<15; ++i ) {
+	for ( j=1; (j<=fv->sel_index || j<1) && mv->clen<selectmax; ++j ) {
+	    for ( i=0; i<map->enccount && mv->clen<selectmax; ++i ) {
 		int gid = map->map[i];
 		if ( gid!=-1 && fv->b.selected[i]==j && fv->b.sf->glyphs[gid]!=NULL ) {
 		    mv->chars[mv->clen++] = fv->b.sf->glyphs[gid];
@@ -5308,13 +5290,13 @@ MetricsView *MetricsViewCreate(FontView *fv,SplineChar *sc,BDFFont *bdf) {
     mv->chars[mv->clen] = NULL;
 
     for ( cnt=0; cnt<mv->clen; ++cnt ) {
-        if ( mv->chars[cnt]->unicodeenc != -1 )
-	    pt = utf8_idpb(pt,mv->chars[cnt]->unicodeenc,0);
+        int cp = mv->chars[cnt]->unicodeenc;
+        if ( cp != -1 && strchr("#[]/\\", cp) == NULL)
+	    pt = utf8_idpb(pt,cp,0);
         else {
             *pt = '/'; pt++;
             strcpy(pt, mv->chars[cnt]->name);
             pt += strlen(mv->chars[cnt]->name);
-            *pt = ' '; pt++;
         }
     }
     *pt = '\0';
@@ -5399,10 +5381,12 @@ MetricsView *MetricsViewCreate(FontView *fv,SplineChar *sc,BDFFont *bdf) {
     MVSetFeatures(mv);
     MVMakeLabels(mv);
     MVResize(mv);
+    GWidgetIndicateFocusGadget(mv->text);
 
     GDrawSetVisible(mv->v,true);
     GDrawSetVisible(gw,true);
     /*GWidgetHidePalettes();*/
+    free(buf);
 return( mv );
 }
 

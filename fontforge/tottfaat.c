@@ -24,8 +24,21 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "tottfaat.h"
+
+#include "asmfpst.h"
 #include "fontforge.h"
-#include <utype.h>
+#include "fvfonts.h"
+#include "gfile.h"
+#include "macenc.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "tottf.h"
+#include "tottfgpos.h"
+#include "utype.h"
 
 #include "ttf.h"
 
@@ -383,7 +396,7 @@ return;
 
     /* Old kerning format (version 0) uses 16 bit quantities */
     /* Apple's new format (version 0x00010000) uses 32 bit quantities */
-    at->kern = tmpfile();
+    at->kern = GFileTmpfile();
     if ( must_use_old_style  ||
 	    ( kcnt.kccnt==0 && kcnt.vkccnt==0 && kcnt.ksm==0 && mmcnt==0 )) {
 	/* MS does not support format 1,2,3 kern sub-tables so if we have them */
@@ -486,7 +499,7 @@ void aat_dumplcar(struct alltabs *at, SplineFont *sf) {
 	if ( k==0 ) {
 	    if ( seg_cnt==0 )
 return;
-	    lcar = tmpfile();
+	    lcar = GFileTmpfile();
 	    putlong(lcar, 0x00010000);	/* version */
 	    putshort(lcar,0);		/* data are distances (not points) */
 
@@ -1092,7 +1105,7 @@ static int morx_dumpASM(FILE *temp,ASM *sm, struct alltabs *at, SplineFont *sf )
     stcnt = 0;
     subslookups = NULL; subsins = NULL;
     if ( sm->type==asm_context ) {
-	subslookups = malloc(2*sm->state_cnt*sm->class_cnt*sizeof(OTLookup));
+	subslookups = malloc(2*sm->state_cnt*sm->class_cnt*sizeof(OTLookup*));
 	for ( j=0; j<sm->state_cnt*sm->class_cnt; ++j ) {
 	    struct asm_state *this = &sm->state[j];
 	    transdata[j].mark_index = transdata[j].cur_index = 0xffff;
@@ -1147,7 +1160,7 @@ static int morx_dumpASM(FILE *temp,ASM *sm, struct alltabs *at, SplineFont *sf )
 	}
     } else if ( sm->type==asm_kern ) {
 	int off=0;
-	kernvalues = tmpfile();
+	kernvalues = GFileTmpfile();
 	for ( j=0; j<sm->state_cnt*sm->class_cnt; ++j ) {
 	    struct asm_state *this = &sm->state[j];
 	    transdata[j].mark_index = 0xffff;
@@ -1677,7 +1690,7 @@ return;
 	if ( k==0 ) {
 	    ++fcnt;		/* Add one for "All Typographic Features" */
 	    ++scnt;		/* Add one for All Features */
-	    at->feat = tmpfile();
+	    at->feat = GFileTmpfile();
 	    at->feat_name = malloc((fcnt+scnt+1)*sizeof(struct feat_name));
 	    putlong(at->feat,0x00010000);
 	    putshort(at->feat,fcnt);
@@ -1891,7 +1904,7 @@ static void morxDumpChain(struct alltabs *at,struct feature *features,
 }
 
 void aat_dumpmorx(struct alltabs *at, SplineFont *sf) {
-    FILE *temp = tmpfile();
+    FILE *temp = GFileTmpfile();
     struct feature *features = NULL, *features_by_type;
     int nchains, i;
     OTLookup *otl;
@@ -1953,7 +1966,7 @@ return;
     nchains = featuresAssignFlagsChains(features,features_by_type);
     SetExclusiveOffs(features_by_type);
 
-    at->morx = tmpfile();
+    at->morx = GFileTmpfile();
     putlong(at->morx,0x00020000);
     putlong(at->morx,nchains);
     for ( i=0; i<nchains; ++i )
@@ -2047,7 +2060,7 @@ void aat_dumpopbd(struct alltabs *at, SplineFont *_sf) {
 	if ( k==0 ) {
 	    if ( seg_cnt==0 )
 return;
-	    opbd = tmpfile();
+	    opbd = GFileTmpfile();
 	    putlong(opbd, 0x00010000);	/* version */
 	    putshort(opbd,0);		/* data are distances (not control points) */
 
@@ -2186,7 +2199,7 @@ void aat_dumpprop(struct alltabs *at, SplineFont *sf) {
     if ( props==NULL )
 return;
 
-    at->prop = tmpfile();
+    at->prop = GFileTmpfile();
     putlong(at->prop,0x00020000);
     putshort(at->prop,1);		/* Lookup data */
     putshort(at->prop,0);		/* default property is simple l2r */
@@ -2361,7 +2374,7 @@ return;
 
     baselines = PerGlyphDefBaseline(sf,&def_baseline);
 
-    at->bsln = tmpfile();
+    at->bsln = GFileTmpfile();
     putlong(at->bsln,0x00010000);	/* Version */
     if ( def_baseline & 0x100 )		/* Only one baseline in the font */
 	putshort(at->bsln,0);		/* distanced based (no control point), no per-glyph info */

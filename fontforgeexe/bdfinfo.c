@@ -26,14 +26,19 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
 /* Routines to handle bdf properties, and a dialog to set them */
+#include "bitmapchar.h"
 #include "fontforgeui.h"
+#include "gkeysym.h"
+#include "splinefill.h"
 #include "splinefont.h"
-#include <string.h>
-#include <ustring.h>
-#include <utype.h>
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
-#include <gkeysym.h>
+#include <string.h>
 
 extern GBox _ggadget_Default_Box;
 #define ACTIVE_BORDER   (_ggadget_Default_Box.active_border)

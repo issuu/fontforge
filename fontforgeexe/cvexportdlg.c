@@ -24,16 +24,24 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autohint.h"
+#include "cvexport.h"
+#include "cvundoes.h"
 #include "fontforgeui.h"
-#include <math.h>
-#include <locale.h>
-#include <string.h>
 #include "gfile.h"
-#include <time.h>
-#include "ustring.h"
-#include "gio.h"
 #include "gicons.h"
-#include <utype.h>
+#include "gio.h"
+#include "gkeysym.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
+#include <math.h>
+#include <string.h>
+#include <time.h>
 
 static char *last = NULL;
 static char *last_bits = NULL;
@@ -47,6 +55,148 @@ struct sizebits {
 
 #define CID_Size	1000
 #define CID_Bits	1001
+
+static int EXPP_OK(GGadget *g, GEvent *e) {
+    if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate )
+	*(int *) GDrawGetUserData(GGadgetGetWindow(g)) = true;
+return( true );
+}
+
+static int expp_e_h(GWindow gw, GEvent *event) {
+    if ( event->type==et_close ) {
+	*(int *) GDrawGetUserData(gw) = true;
+    } else if ( event->type == et_char ) {
+	/*
+	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
+	    help("XXX");
+	    return( true );
+	}
+	*/
+	return( false );
+    }
+    return( true );
+}
+
+void _ExportParamsDlg(ExportParams *ep) {
+    GRect pos;
+    GWindow gw;
+    GWindowAttrs wattrs;
+    GGadgetCreateData gcd[5], boxes[4], *hvarray[5][4], *barray[4];
+    GTextInfo label[5];
+    int done = false;
+    int k, ut_k, al_k;
+
+    if ( no_windowing_ui )
+	return;
+
+    memset(&wattrs,0,sizeof(wattrs));
+    wattrs.mask = wam_events|wam_cursor|wam_utf8_wtitle|wam_undercursor|wam_isdlg|wam_restrict;
+    wattrs.event_masks = ~(1<<et_charup);
+    wattrs.restrict_input_to_me = 1;
+    wattrs.undercursor = 1;
+    wattrs.cursor = ct_pointer;
+    wattrs.utf8_window_title = _("Export Options");
+    wattrs.is_dlg = true;
+    pos.x = pos.y = 0;
+    pos.width = GGadgetScale(GDrawPointsToPixels(NULL,200));
+    pos.height = GDrawPointsToPixels(NULL,200);
+    gw = GDrawCreateTopWindow(NULL,&pos,expp_e_h,&done,&wattrs);
+
+    memset(&label,0,sizeof(label));
+    memset(&gcd,0,sizeof(gcd));
+    memset(&boxes,0,sizeof(boxes));
+    memset(&hvarray,0,sizeof(hvarray));
+
+    k = 0;
+    label[k].text = (unichar_t *) _("The following options influence how glyphs are exported.\n"
+                                    "Most are specific to one or more formats.")
+;
+    label[k].text_is_1byte = true;
+    gcd[k].gd.label = &label[k];
+    gcd[k].gd.pos.x = 10; gcd[k].gd.pos.y = 6;
+    gcd[k].gd.flags = gg_enabled | gg_visible;
+    gcd[k++].creator = GLabelCreate;
+    hvarray[0][0] = &gcd[k-1];
+    hvarray[0][1] = GCD_ColSpan;
+    hvarray[0][2] = GCD_ColSpan;
+    hvarray[0][3] = NULL;
+
+    ut_k = k;
+    label[k].text = (unichar_t *) _("_Use Transform (SVG)");
+    label[k].text_is_1byte = true;
+    label[k].text_in_resource = true;
+    gcd[k].gd.label = &label[k];
+    gcd[k].gd.flags = gg_enabled | gg_visible | (ep->use_transform?gg_cb_on:0);
+    gcd[k].gd.popup_msg = _("FontForge previously exported glyphs using a SVG\n"
+                            "transform element to flip the Y-axis rather\n"
+                            "than changing the individual values. This option\n"
+			    "reverts to that convention.");
+    gcd[k++].creator = GCheckBoxCreate;
+    hvarray[1][0] = &gcd[k-1];
+    hvarray[1][1] = GCD_ColSpan;
+    hvarray[1][2] = GCD_ColSpan;
+    hvarray[1][3] = NULL;
+
+    al_k = k;
+    label[k].text = (unichar_t *) _("_Always raise this dialog when exporting");
+    label[k].text_is_1byte = true;
+    label[k].text_in_resource = true;
+    gcd[k].gd.label = &label[k];
+    gcd[k].gd.pos.x = gcd[k-1].gd.pos.x; gcd[k].gd.pos.y = gcd[k-1].gd.pos.y+15;
+    gcd[k].gd.flags = gg_enabled | gg_visible | (ep->show_always?gg_cb_on:0);
+    gcd[k++].creator = GCheckBoxCreate;
+    hvarray[2][0] = &gcd[k-1];
+    hvarray[2][1] = GCD_ColSpan;
+    hvarray[2][2] = GCD_ColSpan;
+    hvarray[2][3] = NULL;
+
+    gcd[k].gd.flags = gg_visible | gg_enabled | gg_but_default;
+    label[k].text = (unichar_t *) _("_OK");
+    label[k].text_is_1byte = true;
+    label[k].text_in_resource = true;
+    gcd[k].gd.label = &label[k];
+    gcd[k].gd.handle_controlevent = EXPP_OK;
+    gcd[k++].creator = GButtonCreate;
+    barray[0] = GCD_Glue;
+    barray[1] = &gcd[k-1];
+    barray[2] = GCD_Glue;
+    barray[3] = NULL;
+
+    boxes[2].gd.flags = gg_enabled | gg_visible;
+    boxes[2].gd.u.boxelements = barray;
+    boxes[2].creator = GHBoxCreate;
+    hvarray[3][0] = &boxes[2];
+    hvarray[3][1] = GCD_ColSpan;
+    hvarray[3][2] = GCD_ColSpan;
+    hvarray[3][3] = NULL;
+    hvarray[4][0] = NULL;
+
+    boxes[0].gd.pos.x = boxes[0].gd.pos.y = 2;
+    boxes[0].gd.flags = gg_enabled | gg_visible;
+    boxes[0].gd.u.boxelements = hvarray[0];
+    boxes[0].creator = GHVGroupCreate;
+
+    GGadgetsCreate(gw,boxes);
+    GHVBoxSetExpandableRow(boxes[0].ret,gb_expandglue);
+    GHVBoxSetExpandableCol(boxes[2].ret,gb_expandgluesame);
+    GHVBoxFitWindow(boxes[0].ret);
+
+    GDrawSetVisible(gw,true);
+
+    while ( !done )
+	GDrawProcessOneEvent(NULL);
+
+    ep->use_transform = GGadgetIsChecked(gcd[ut_k].ret);
+    ep->show_always = GGadgetIsChecked(gcd[al_k].ret);
+    GDrawDestroyWindow(gw);
+}
+
+static void ShowExportOptions(ExportParams *ep, int shown,
+                              enum shown_params type) {
+    if ( !shown && (!(ep->shown_mask & type) || ep->show_always) )
+	_ExportParamsDlg(ep);
+    ep->shown_mask |= type;
+}
 
 static int SB_OK(GGadget *g, GEvent *e) {
     if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
@@ -223,24 +373,12 @@ return( ExportImage(filename,sc, layer, format, pixelsize, bitsperpixel));
 struct gfc_data {
     int done;
     int ret;
+    int opts_shown;
     GGadget *gfc;
     GGadget *format;
     SplineChar *sc;
     BDFChar *bc;
     int layer;
-};
-
-
-static GTextInfo bcformats[] = {
-/* 0=*.xbm, 1=*.bmp, 2=*.png, 3=*.xpm, 4=*.c(fontforge-internal) */
-    { (unichar_t *) N_("X Bitmap"), NULL, 0, 0, (void *) 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0' },
-    { (unichar_t *) N_("BMP"), NULL, 0, 0, (void *) 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0' },
-#ifndef _NO_LIBPNG
-    { (unichar_t *) N_("png"), NULL, 0, 0, (void *) 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0' },
-#endif
-    { (unichar_t *) N_("X Pixmap"), NULL, 0, 0, (void *) 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0' },
-    { (unichar_t *) N_("C FontForge"), NULL, 0, 0, (void *) 4, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0' },
-    GTEXTINFO_EMPTY
 };
 
 static GTextInfo formats[] = {
@@ -261,26 +399,30 @@ static GTextInfo formats[] = {
     { (unichar_t *) N_("C FontForge"), NULL, 0, 0, (void *) (BITMAP_FORMAT_START+4), 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0' },
     GTEXTINFO_EMPTY
 };
-static int last_format = 0;
+static int last_format = 0, blast_format = BITMAP_FORMAT_START;
 
 static void DoExport(struct gfc_data *d,unichar_t *path) {
     char *temp;
-    int format, good;
+    int format, good = 0;
 
     temp = cu_copy(path);
-    last_format = format = (intpt) (GGadgetGetListItemSelected(d->format)->userdata);
-    if ( d->bc )
-	last_format += BITMAP_FORMAT_START;
+    format = (intpt) (GGadgetGetListItemSelected(d->format)->userdata);
     if ( d->bc!=NULL )
-	good = BCExportXBM(temp,d->bc,format);
+        blast_format = format;
+    else
+        last_format = format;
+    if ( d->bc!=NULL )
+	good = BCExportXBM(temp,d->bc,format-BITMAP_FORMAT_START);
     else if ( format==0 )
 	good = ExportEPS(temp,d->sc,d->layer);
     else if ( format==1 )
 	good = ExportFig(temp,d->sc,d->layer);
-    else if ( format==2 )
-	good = ExportSVG(temp,d->sc,d->layer);
-    else if ( format==3 )
-	good = ExportGlif(temp,d->sc,d->layer);
+    else if ( format==2 ) {
+	ExportParams *ep = ExportParamsState();
+	ShowExportOptions(ep, d->opts_shown, sp_svg);
+	good = ExportSVG(temp,d->sc,d->layer,ep);
+    } else if ( format==3 )
+	good = ExportGlif(temp,d->sc,d->layer,3);
     else if ( format==4 )
 	good = ExportPDF(temp,d->sc,d->layer);
     else if ( format==5 )
@@ -359,15 +501,8 @@ static int GFD_Format(GGadget *g, GEvent *e) {
 	pt = u_strrchr(f2,'.');
 	if ( pt==NULL )
 	    pt = f2+u_strlen(f2);
-	if ( d->bc!=NULL )
-	    uc_strcpy(pt,format==0?".xbm":
-			 format==1?".bmp":
-			//format==2?".png":
-			 format==3?".xpm":
-			 format==4?".c":
-				   ".png");
 #ifndef _NO_PYTHON
-	else if ( format>=fv_pythonbase )
+	if ( format>=fv_pythonbase )
 	    uc_strcpy(pt+1,py_ie[format-fv_pythonbase].extension);
 #endif
 	else
@@ -408,6 +543,16 @@ static void GFD_dircreatefailed(GIOControl *gio) {
     free(temp);
     GFileChooserReplaceIO(d->gfc,NULL);
     GFileChooserReplaceIO(d->gfc,NULL);
+}
+
+static int GFD_Options(GGadget *g, GEvent *e) {
+    if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
+        struct gfc_data *d = GDrawGetUserData(GGadgetGetWindow(g));
+	_ExportParamsDlg(ExportParamsState());
+	d->opts_shown = true;
+	return true;
+    }
+    return false;
 }
 
 static int GFD_NewDir(GGadget *g, GEvent *e) {
@@ -480,27 +625,27 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     GRect pos;
     GWindow gw;
     GWindowAttrs wattrs;
-    GGadgetCreateData gcd[8], boxes[4], *hvarray[8], *harray[5], *barray[10];
-    GTextInfo label[7];
+    GGadgetCreateData gcd[9], boxes[4], *hvarray[8], *harray[7], *barray[10];
+    GTextInfo label[8];
     struct gfc_data d;
     GGadget *pulldown, *files, *tf;
     char buffer[100]; unichar_t ubuf[100];
     char *ext;
-    int _format, i;
-    int /*bs = GIntGetResource(_NUM_Buttonsize), bsbigger,*/ totwid;
+    int _format, _lpos, i;
+    int bs = GIntGetResource(_NUM_Buttonsize), bsbigger, totwid, scalewid;
     static int done = false;
     GTextInfo *cur_formats;
 
     if ( !done ) {
 	for ( i=0; formats[i].text!=NULL; ++i )
 	    formats[i].text= (unichar_t *) _((char *) formats[i].text);
-	for ( i=0; bcformats[i].text!=NULL; ++i )
-	    bcformats[i].text= (unichar_t *) _((char *) bcformats[i].text);
 	done = true;
     }
-    if ( bc==NULL )
+    if ( bc==NULL ) {
 	formats[5].disabled = !CanBeAPlateFile(sc);
-    cur_formats = bc==NULL ? formats : bcformats;
+        cur_formats = formats;
+    } else
+        cur_formats = formats + BITMAP_FORMAT_START;
 #ifndef _NO_PYTHON
     if ( bc==NULL && py_ie!=NULL ) {
 	int cnt, extras;
@@ -535,8 +680,10 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     wattrs.cursor = ct_pointer;
     wattrs.utf8_window_title = _("Export");
     pos.x = pos.y = 0;
-    totwid = GGadgetScale(300);
-    pos.width = GDrawPointsToPixels(NULL,200);
+    totwid = 240;
+    scalewid = GGadgetScale(totwid);
+    bsbigger = 3*bs+4*14>scalewid; scalewid = bsbigger?3*bs+4*12:scalewid;
+    pos.width = GDrawPointsToPixels(NULL,scalewid);
     pos.height = GDrawPointsToPixels(NULL,255);
     gw = GDrawCreateTopWindow(NULL,&pos,e_h,&d,&wattrs);
 
@@ -544,10 +691,12 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     memset(&gcd,0,sizeof(gcd));
     memset(&boxes,0,sizeof(boxes));
 
+    gcd[0].gd.pos.x = 12; gcd[0].gd.pos.y = 6; gcd[0].gd.pos.width = totwid-24; gcd[0].gd.pos.height = 182;
     gcd[0].gd.flags = gg_visible | gg_enabled;
     gcd[0].creator = GFileChooserCreate;
     hvarray[0] = &gcd[0]; hvarray[1] = NULL;
 
+    gcd[1].gd.pos.x = 12; gcd[1].gd.pos.y = 224-3; gcd[1].gd.pos.width = -1; gcd[1].gd.pos.height = 0;
     gcd[1].gd.flags = gg_visible | gg_enabled | gg_but_default;
     label[1].text = (unichar_t *) _("_Save");
     label[1].text_is_1byte = true;
@@ -557,6 +706,7 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     gcd[1].creator = GButtonCreate;
     barray[0] = GCD_Glue; barray[1] = &gcd[1]; barray[2] = GCD_Glue;
 
+    gcd[2].gd.pos.x = (totwid-bs)*100/GIntGetResource(_NUM_ScaleFactor)/2; gcd[2].gd.pos.y = 224; gcd[2].gd.pos.width = -1; gcd[2].gd.pos.height = 0;
     gcd[2].gd.flags = gg_visible | gg_enabled;
     label[2].text = (unichar_t *) _("_Filter");
     label[2].text_is_1byte = true;
@@ -582,7 +732,6 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     boxes[2].creator = GHBoxCreate;
     hvarray[4] = &boxes[2]; hvarray[5] = NULL;
 
-    gcd[4].gd.pos.x = gcd[3].gd.pos.x; gcd[4].gd.pos.y = 194; gcd[4].gd.pos.width = -1; gcd[4].gd.pos.height = 0;
     gcd[4].gd.flags = gg_visible | gg_enabled;
     label[4].text = (unichar_t *) S_("Directory|_New");
     label[4].text_is_1byte = true;
@@ -593,37 +742,46 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     gcd[4].gd.handle_controlevent = GFD_NewDir;
     gcd[4].creator = GButtonCreate;
 
-    gcd[5].gd.pos.x = 12; gcd[5].gd.pos.y = 200; gcd[5].gd.pos.width = 0; gcd[5].gd.pos.height = 0;
     gcd[5].gd.flags = gg_visible | gg_enabled;
-    label[5].text = (unichar_t *) _("Format:");
+    label[5].text = (unichar_t *) _("_Options");
     label[5].text_is_1byte = true;
+    label[5].text_in_resource = true;
     gcd[5].gd.label = &label[5];
-    gcd[5].creator = GLabelCreate;
-    harray[0] = &gcd[5];
+    gcd[5].gd.handle_controlevent = GFD_Options;
+    gcd[5].creator = GButtonCreate;
 
-    _format = last_format;
+    gcd[6].gd.flags = gg_visible | gg_enabled;
+    label[6].text = (unichar_t *) _("Format:");
+    label[6].text_is_1byte = true;
+    gcd[6].gd.label = &label[6];
+    gcd[6].creator = GLabelCreate;
+    harray[0] = &gcd[6];
+
     if ( bc!=NULL ) {
-	_format-=2;
-	if ( _format<0 || _format>2 ) _format = 0;
+	_format = blast_format;
+	_lpos = _format - BITMAP_FORMAT_START;
+    } else {
+	_format = last_format;
+	_lpos = _format;
     }
-    gcd[6].gd.pos.x = 55; gcd[6].gd.pos.y = 194; 
-    gcd[6].gd.flags = gg_visible | gg_enabled ;
-    gcd[6].gd.u.list = cur_formats;
+    gcd[7].gd.flags = gg_visible | gg_enabled ;
+    gcd[7].gd.u.list = cur_formats;
     if ( bc!=NULL ) {
-	bcformats[0].disabled = bc->byte_data;
-	if ( _format==0 ) _format=1;
+	cur_formats[0].disabled = bc->byte_data;
+	if ( _lpos==0 ) _lpos=1;
     }
-    gcd[6].gd.label = &cur_formats[_format];
-    gcd[6].gd.u.list[0].selected = true;
-    gcd[6].gd.handle_controlevent = GFD_Format;
-    gcd[6].creator = GListButtonCreate;
+    gcd[7].gd.label = &cur_formats[_lpos];
+    gcd[7].gd.handle_controlevent = GFD_Format;
+    gcd[7].creator = GListButtonCreate;
     for ( i=0; cur_formats[i].text!=NULL; ++i )
 	cur_formats[i].selected =false;
-    cur_formats[_format].selected = true;
-    harray[1] = &gcd[6];
+    cur_formats[_lpos].selected = true;
+    harray[1] = &gcd[7];
     harray[2] = GCD_Glue;
     harray[3] = &gcd[4];
-    harray[4] = NULL;
+    harray[4] = GCD_Glue;
+    harray[5] = &gcd[5];
+    harray[6] = NULL;
 
     boxes[3].gd.flags = gg_enabled|gg_visible;
     boxes[3].gd.u.boxelements = harray;
@@ -644,13 +802,11 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     GHVBoxSetExpandableCol(boxes[3].ret,gb_expandglue);
 
     GFileChooserConnectButtons(gcd[0].ret,gcd[1].ret,gcd[2].ret);
-    if ( bc!=NULL )
-	ext = _format==0 ? "xbm" : _format==1 ? "bmp" : "png";
 #ifndef _NO_PYTHON
-    else if ( _format>=fv_pythonbase )
+    if ( _format>=fv_pythonbase )
 	ext = py_ie[_format-fv_pythonbase].extension;
-#endif
     else
+#endif
 	ext = _format==0?"eps":_format==1?"fig":_format==2?"svg":
 		_format==3?"glif":
 		_format==4?"pdf":_format==5?"plate":
@@ -674,7 +830,7 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     GFileChooserGetChildren(gcd[0].ret,&pulldown,&files,&tf);
     GWidgetIndicateFocusGadget(tf);
 
-    if ( cur_formats!=formats && cur_formats!=bcformats )
+    if ( cur_formats!=formats && cur_formats!=formats+BITMAP_FORMAT_START )
 	GTextInfoListFree(cur_formats);
 
     memset(&d,'\0',sizeof(d));
@@ -682,7 +838,7 @@ static int _Export(SplineChar *sc,BDFChar *bc,int layer) {
     d.bc = bc;
     d.layer = layer;
     d.gfc = gcd[0].ret;
-    d.format = gcd[6].ret;
+    d.format = gcd[7].ret;
 
     GHVBoxFitWindow(boxes[0].ret);
 

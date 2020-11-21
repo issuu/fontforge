@@ -24,8 +24,10 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "gimage.h"
-#include <string.h>
 
 struct sgiheader {
     short magic;		/* Magic (SGI identification) number	*/
@@ -212,7 +214,7 @@ GImage *GImageReadRgb(char *filename) {
 
 	/* First, get offset table info */
 	tablen = header.height*header.chans;
-	if ( (starttab=(unsigned long *)calloc(1,tablen*sizeof(long)))==NULL || \
+	if ( (starttab=(unsigned long *)calloc(1,tablen*sizeof(unsigned long)))==NULL || \
 	   /*(lengthtab=(unsigned long *)calloc(1,tablen*sizeof(long)))==NULL || \ */
 	     (ptrtab=(unsigned char **)calloc(1,tablen*sizeof(unsigned char *)))==NULL ) {
 	    NoMoreMemMessage();
@@ -313,6 +315,7 @@ GImage *GImageReadRgb(char *filename) {
 	    free(r); free(g); free(b); free(a);
 	}
     }
+    fclose(fp);
     return( ret );
 
 errorGImageReadRgbFile:

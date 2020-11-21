@@ -25,10 +25,17 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
-#include <utype.h>
+#include "spiro.h"
+#include "splinefit.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "utype.h"
+
 #include <math.h>
-#include "collabclient.h"
 extern void BackTrace( const char* msg );
 
 int stop_at_join = false;
@@ -44,20 +51,7 @@ int CVAnySel(CharView *cv, int *anyp, int *anyr, int *anyi, int *anya) {
     int i;
 
     for ( spl = cv->b.layerheads[cv->b.drawmode]->splines; spl!=NULL && !anypoints; spl = spl->next ) {
-	if ( cv->b.sc->inspiro && hasspiro()) {
-	    for ( i=0; i<spl->spiro_cnt-1; ++i )
-		if ( SPIRO_SELECTED(&spl->spiros[i])) {
-		    anypoints = true;
-	    break;
-		}
-	} else {
-	    first = NULL;
-	    if ( spl->first->selected ) anypoints = true;
-	    for ( spline=spl->first->next; spline!=NULL && spline!=first && !anypoints; spline = spline->to->next ) {
-		if ( spline->to->selected ) anypoints = true;
-		if ( first == NULL ) first = spline;
-	    }
-	}
+        anypoints = SplinePointListCheckSelected1(spl, cv->b.sc->inspiro && hasspiro(), NULL, true);
     }
     for ( rf=cv->b.layerheads[cv->b.drawmode]->refs; rf!=NULL && !anyrefs; rf=rf->next )
 	if ( rf->selected ) anyrefs = true;
@@ -144,7 +138,8 @@ int CVClearSel(CharView *cv) {
     int needsupdate = 0;
     AnchorPoint *ap;
 
-    CVFreePreTransformSPL( cv );
+    SplinePointListFree(cv->p.pretransform_spl);
+    cv->p.pretransform_spl = NULL;
     
     cv->lastselpt = NULL; cv->lastselcp = NULL;
     for ( spl = cv->b.layerheads[cv->b.drawmode]->splines; spl!=NULL; spl = spl->next )
@@ -497,10 +492,11 @@ int CVNearLBearingLine( CharView* cv, real x, real fudge )
 
 
 void CVCheckResizeCursors(CharView *cv) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     RefChar *ref;
     ImageList *img;
     int old_ee = cv->expandedge;
-    real fudge = 3.5/cv->scale;
+    real fudge = 3.5/tab->scale;
 
     cv->expandedge = ee_none;
     if ( cv->b.drawmode!=dm_grid ) {
@@ -521,8 +517,8 @@ void CVCheckResizeCursors(CharView *cv) {
 	    else if( CVNearLBearingLine( cv, cv->info.x, fudge ))
 		cv->expandedge = ee_left;
 	    if ( cv->showvmetrics && cv->b.sc->parent->hasvmetrics && cv->b.container==NULL &&
-		    cv->info.y > /*cv->b.sc->parent->vertical_origin*/-cv->b.sc->vwidth-fudge &&
-		    cv->info.y < /*cv->b.sc->parent->vertical_origin*/-cv->b.sc->vwidth+fudge )
+		    cv->info.y > -cv->b.sc->vwidth - fudge + cv->b.sc->parent->ascent &&
+		    cv->info.y < -cv->b.sc->vwidth + fudge + cv->b.sc->parent->ascent)
 		cv->expandedge = ee_down;
 	}
     }
@@ -644,8 +640,8 @@ return;
 		cv->p.cx<cv->b.sc->top_accent_horiz+fs->fudge &&
 		cv->b.container==NULL );
     dovwidth = ( cv->showvmetrics && cv->b.sc->parent->hasvmetrics && cv->b.container == NULL &&
-		cv->p.cy>/*cv->b.sc->parent->vertical_origin*/-cv->b.sc->vwidth-fs->fudge &&
-		cv->p.cy</*cv->b.sc->parent->vertical_origin*/-cv->b.sc->vwidth+fs->fudge &&
+		cv->p.cy > -cv->b.sc->vwidth + cv->b.sc->parent->ascent - fs->fudge &&
+		cv->p.cy < -cv->b.sc->vwidth + cv->b.sc->parent->ascent + fs->fudge &&
 		usemymetrics==NULL );
     cv->nearcaret = nearcaret = -1;
     if ( cv->showhmetrics ) nearcaret = NearCaret(cv->b.sc,cv->p.cx,fs->fudge);
@@ -664,11 +660,8 @@ return;
 	needsupdate = CVClearSel(cv);
     }
 
-//    printf("CVMouseDownPointer() dowidth:%d dolbearing:%d\n", dowidth, dolbearing );
-
     if ( !fs->p->anysel )
     {
-//	printf("mousedown !anysel dow:%d dov:%d doid:%d dotah:%d nearcaret:%d\n", dowidth, dovwidth, doic, dotah, nearcaret );
 	/* Nothing else... unless they clicked on the width line, check that */
 	if ( dowidth )
 	{
@@ -763,16 +756,6 @@ return;
 		cv->expandedge = ee_none;
 	    SetCur(cv);
 	    needsupdate = true;
-	}
-	else
-	{
-//	    printf("mousedown !anysel ELSE\n");
-	    //
-	    // Allow dragging a box around some points to send that information
-	    // to the other clients in the collab session
-	    //
-	    if( collabclient_inSession( &cv->b ))
-		CVPreserveState(&cv->b);
 	}
     }
     else if ( event->u.mouse.clicks<=1 && !(event->u.mouse.state&ksm_shift))
@@ -1045,7 +1028,7 @@ bool isSplinePointPartOfGuide( SplineFont *sf, SplinePoint *sp )
 
 static void CVAdjustSpline(CharView *cv) {
     Spline *old = cv->p.spline;
-    TPoint tp[5];
+    FitPoint fp[5];
     real t;
     Spline1D *oldx = &old->splines[0], *oldy = &old->splines[1];
     int oldfrompointtype, oldtopointtype;
@@ -1087,18 +1070,18 @@ return;
     }
 
 
-    tp[0].x = cv->info.x; tp[0].y = cv->info.y; tp[0].t = cv->p.t;
+    fp[0].p.x = cv->info.x; fp[0].p.y = cv->info.y; fp[0].t = cv->p.t;
     t = cv->p.t/10;
-    tp[1].x = ((oldx->a*t+oldx->b)*t+oldx->c)*t + oldx->d;
-    tp[1].y = ((oldy->a*t+oldy->b)*t+oldy->c)*t + oldy->d;
-    tp[1].t = t;
+    fp[1].p.x = ((oldx->a*t+oldx->b)*t+oldx->c)*t + oldx->d;
+    fp[1].p.y = ((oldy->a*t+oldy->b)*t+oldy->c)*t + oldy->d;
+    fp[1].t = t;
     t = 1-(1-cv->p.t)/10;
-    tp[2].x = ((oldx->a*t+oldx->b)*t+oldx->c)*t + oldx->d;
-    tp[2].y = ((oldy->a*t+oldy->b)*t+oldy->c)*t + oldy->d;
-    tp[2].t = t;
-    tp[3] = tp[0];		/* Give more weight to this point than to the others */
-    tp[4] = tp[0];		/*  ditto */
-    cv->p.spline = ApproximateSplineFromPoints(old->from,old->to,tp,5,old->order2);
+    fp[2].p.x = ((oldx->a*t+oldx->b)*t+oldx->c)*t + oldx->d;
+    fp[2].p.y = ((oldy->a*t+oldy->b)*t+oldy->c)*t + oldy->d;
+    fp[2].t = t;
+    fp[3] = fp[0];		/* Give more weight to this point than to the others */
+    fp[4] = fp[0];		/*  ditto */
+    cv->p.spline = ApproximateSplineFromPoints(old->from,old->to,fp,5,old->order2);
 
     /* don't change hvcurves to corners */
     oldfrompointtype = old->from->pointtype;
@@ -1142,8 +1125,9 @@ return( a>-fudge && a<fudge );
 /*  are the same in both representations). The only complication is checking */
 /*  that they are selected */
 static int CVCheckMerges(CharView *cv ) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     SplineSet *activess, *mergess;
-    real fudge = 2/cv->scale;
+    real fudge = 2/tab->scale;
     int cnt= -1;
     int firstsel, lastsel;
     int mfirstsel, mlastsel;
@@ -1208,12 +1192,20 @@ static void adjustLBearing( CharView *cv, SplineChar *sc, real val )
     SplineCharFindBounds(sc,&bb);
     if ( val != 0 )
     {
+	enum fvtrans_flags flags = fvt_alllayers | fvt_nopreserve;
 	real transform[6];
 	transform[0] = transform[3] = 1.0;
 	transform[1] = transform[2] = transform[5] = 0;
 	transform[4] = val;
-	printf("adjustLBearing val:%f min:%f v-min:%f\n",val,bb.minx,(bb.minx+val));
-	FVTrans( (FontViewBase *) cv->b.fv, sc, transform, NULL, 0 | fvt_alllayers );
+	// With no recent change, assume CVPreserveState was called.
+	// Remove it, as it doesn't preserve hints or other layers
+	// Instead, delegate to FVTrans to do this.
+	if (!cv->recentchange) {
+	    CVRemoveTopUndo(&cv->b);
+	    flags &= ~fvt_nopreserve;
+	}
+//	printf("adjustLBearing val:%f min:%f v-min:%f\n",val,bb.minx,(bb.minx+val));
+	FVTrans( (FontViewBase *) cv->b.fv, sc, transform, NULL, flags );
 	// We copy and adapt some code from FVTrans in order to adjust the CharView carets.
 	// We omit the fvt_scalepstpos for FVTrans since other CharView code seems to skip updating the SplineChar.
 	PST *pst;
@@ -1229,6 +1221,7 @@ static void adjustLBearing( CharView *cv, SplineChar *sc, real val )
 
 /* Move the selection and return whether we did a merge */
 int CVMoveSelection(CharView *cv, real dx, real dy, uint32 input_state) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     real transform[6];
     RefChar *refs;
     ImageList *img;
@@ -1316,7 +1309,7 @@ return(false);
 	SCOutOfDateBackground(cv->b.sc);
 	changed = true;
     }
-    fudge = snapdistance/cv->scale/2;
+    fudge = snapdistance/tab->scale/2;
     if ( cv->widthsel ) {
 	if ( cv->b.sc->width+dx>0 && ((int16) (cv->b.sc->width+dx))<0 )
 	    cv->b.sc->width = 32767;
@@ -1330,7 +1323,7 @@ return(false);
     }
     if ( cv->lbearingsel ) {
 
-	printf("lbearing dx:%f\n", dx );
+//	printf("lbearing dx:%f\n", dx );
 	adjustLBearing( cv, cv->b.sc, dx );
 	changed = true;
     }
@@ -1486,14 +1479,10 @@ return( false );
 	    cv->p.ey = cv->p.cy;
 	}
 	needsupdate = CVRectSelect(cv,cv->info.x,cv->info.y);
-	if ( !needsupdate && cv->p.rubberbanding )
-	    CVDrawRubberRect(cv->v,cv);
 	/* printf("moving2 cx:%g cy:%g\n", cv->p.cx, cv->p.cy ); */
 	cv->p.ex = cv->info.x;
 	cv->p.ey = cv->info.y;
 	cv->p.rubberbanding = true;
-	if ( !needsupdate )
-	    CVDrawRubberRect(cv->v,cv);
     }
     else if ( cv->p.nextcp )
     {
@@ -1614,6 +1603,9 @@ return( false );
 	/* 			 (void*)cv->b.layerheads[cv->b.drawmode]->order2 ); */
 
 	GDrawRequestExpose(cv->v,NULL,false);
+    } else if (!needsupdate) {
+        // Needed to update the rubber rect
+        GDrawRequestExpose(cv->v,NULL,false);
     }
 
     cv->last_c.x = cv->info.x; cv->last_c.y = cv->info.y;
@@ -1641,7 +1633,7 @@ void CVMouseUpPointer(CharView *cv ) {
     }
     if ( cv->lbearingsel )
     {
-	printf("oldlbearing:%f\n", cv->oldlbearing );
+//	printf("oldlbearing:%f\n", cv->oldlbearing );
 	cv->expandedge = ee_none;
 	GDrawSetCursor(cv->v,ct_mypointer);
     }
@@ -1680,6 +1672,7 @@ void CVMouseUpPointer(CharView *cv ) {
 	    SCSynchronizeLBearing(cv->b.sc,cv->info.x-cv->p.cx,CVLayer((CharViewBase *) cv));
 	}
     }
+    GDrawRequestExpose(cv->v, NULL, false);
     CPEndInfo(cv);
 }
 

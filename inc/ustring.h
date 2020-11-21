@@ -24,13 +24,29 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _UCHAR_H
-# define _UCHAR_H
+
+#ifndef FONTFORGE_UCHAR_H
+#define FONTFORGE_UCHAR_H
+
+#include <fontforge-config.h>
+
+#include "basics.h"
+#include "charset.h"
+
+#include <memory.h>
 #include <stdarg.h>
 #include <string.h>
-#include <memory.h>
-#include <basics.h>
-#include <charset.h>
+
+#pragma push_macro("PRINTF_FORMAT_ATTRIBUTE")
+#ifdef __GNUC__
+#  if defined(__USE_MINGW_ANSI_STDIO) && __USE_MINGW_ANSI_STDIO != 0
+#    define PRINTF_FORMAT_ATTRIBUTE(x, y) __attribute__((format(gnu_printf, x, y)))
+#  else
+#    define PRINTF_FORMAT_ATTRIBUTE(x, y) __attribute__((format(printf, x, y)))
+#  endif
+#else
+#  define PRINTF_FORMAT_ATTRIBUTE(x, y)
+#endif
 
 extern char *copy(const char *);
 extern char *copyn(const char *,long);
@@ -42,6 +58,9 @@ extern unichar_t *uc_copy(const char*);
 extern unichar_t *u_concat(const unichar_t*,const unichar_t*);
 extern char      *cu_copyn(const unichar_t *pt,int len);
 extern char      *cu_copy(const unichar_t*);
+
+extern char *vsmprintf(const char *fmt, va_list args);
+extern char *smprintf(const char *fmt, ...) PRINTF_FORMAT_ATTRIBUTE(1, 2);
 
 extern long uc_strcmp(const unichar_t *,const char *);
 extern long u_strcmp(const unichar_t *, const unichar_t *);
@@ -130,6 +149,7 @@ extern void       utf82u_strcat(unichar_t *ubuf,const char *utf8buf);
 extern unichar_t *utf82u_copyn(const char *utf8buf,int len);
 extern unichar_t *utf82u_copy(const char *utf8buf);
 extern char *u2utf8_strcpy(char *utf8buf,const unichar_t *ubuf);
+extern char *u2utf8_strncpy(char *utf8buf,const unichar_t *ubuf,int len);
 extern char *u2utf8_copy(const unichar_t *ubuf);
 extern char *u2utf8_copyn(const unichar_t *ubuf,int len);
 extern unichar_t *encoding2u_strncpy(unichar_t *uto, const char *from, int n, enum encoding cs);
@@ -209,4 +229,6 @@ extern char* str_replace_all( char* s, char* orig, char* replacement, int free_s
 int toint( char* v );
 char* tostr( int v );
 
-#endif
+#pragma pop_macro("PRINTF_FORMAT_ATTRIBUTE")
+
+#endif /* FONTFORGE_UCHAR_H */

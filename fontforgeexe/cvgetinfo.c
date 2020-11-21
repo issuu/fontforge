@@ -24,14 +24,26 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgeui.h"
-#include <ustring.h>
-#include <math.h>
-#include <utype.h>
-#include <gkeysym.h>
-#include <dlist.h>
 
-#define RAD2DEG	(180/3.1415926535897932)
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
+#include "dlist.h"
+#include "fontforgeui.h"
+#include "gkeysym.h"
+#include "lookups.h"
+#include "parsettf.h"
+#include "spiro.h"
+#include "splineorder2.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
+
+#define RAD2DEG	(180/FF_PI)
 #define TCnt	3
 
 typedef struct gidata {
@@ -53,7 +65,6 @@ typedef struct gidata {
     int interp_start, interp_end;
     GGadgetCreateData* gcd;
     GGadget *group1ret, *group2ret;
-    int nonmodal;
 } GIData;
 
 #define CID_BaseX	2001
@@ -299,7 +310,7 @@ static int gi_e_h(GWindow gw, GEvent *event) {
 	ci->done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("getinfo.html");
+	    help("ui/dialogs/getinfo.html", NULL);
 return( true );
 	}
 return( false );
@@ -377,8 +388,8 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[j].text_is_1byte = true;
 	gcd[j].gd.label = &label[j];
 	gcd[j].gd.pos.x = 5; gcd[j].gd.pos.y = gcd[j-1].gd.pos.y+14;
-	gcd[j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
-	gcd[j].gd.popup_msg = (unichar_t *) _("The transformation matrix specifies how the points in\nthe source glyph should be transformed before\nthey are drawn in the current glyph.\n x(new) = tm[1,1]*x + tm[2,1]*y + tm[3,1]\n y(new) = tm[1,2]*x + tm[2,2]*y + tm[3,2]");
+	gcd[j].gd.flags = gg_enabled|gg_visible;
+	gcd[j].gd.popup_msg = _("The transformation matrix specifies how the points in\nthe source glyph should be transformed before\nthey are drawn in the current glyph.\n x(new) = tm[1,1]*x + tm[2,1]*y + tm[3,1]\n y(new) = tm[1,2]*x + tm[2,2]*y + tm[3,2]");
 	gcd[j].creator = GLabelCreate;
 	varray[l++] = &gcd[j];
 	++j;
@@ -412,9 +423,9 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
 	gcd[6+j].gd.pos.x = 5; gcd[6+j].gd.pos.y = gcd[6+j-1].gd.pos.y+21;
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup | (ref->use_my_metrics?gg_cb_on:0);
+	gcd[6+j].gd.flags = gg_enabled|gg_visible| (ref->use_my_metrics?gg_cb_on:0);
 	gcd[i+j].gd.cid = 6+1000;
-	gcd[6+j].gd.popup_msg = (unichar_t *) _("Only relevant in a truetype font, this flag indicates that the width\nof the composite glyph should be the same as the width of this reference.");
+	gcd[6+j].gd.popup_msg = _("Only relevant in a truetype font, this flag indicates that the width\nof the composite glyph should be the same as the width of this reference.");
 	varray[l++] = &gcd[6+j];
 	gcd[6+j++].creator = GCheckBoxCreate;
 
@@ -423,9 +434,9 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
 	gcd[6+j].gd.pos.x = 5; gcd[6+j].gd.pos.y = gcd[6+j-1].gd.pos.y+14;
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup | (ref->round_translation_to_grid?gg_cb_on:0);
+	gcd[6+j].gd.flags = gg_enabled|gg_visible| (ref->round_translation_to_grid?gg_cb_on:0);
 	gcd[i+j].gd.cid = 7+1000;
-	gcd[6+j].gd.popup_msg = (unichar_t *) _("Only relevant in a truetype font, this flag indicates that if the reference\nis translated, then the translation should be rounded during grid fitting.");
+	gcd[6+j].gd.popup_msg = _("Only relevant in a truetype font, this flag indicates that if the reference\nis translated, then the translation should be rounded during grid fitting.");
 	varray[l++] = &gcd[6+j];
 	gcd[6+j++].creator = GCheckBoxCreate;
 
@@ -434,8 +445,8 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
 	gcd[6+j].gd.pos.x = 5; gcd[6+j].gd.pos.y = gcd[6+j-1].gd.pos.y+17;
-	gcd[6+j].gd.flags = cv->b.sc->layers[ly_fore].order2 ? (gg_enabled|gg_visible|gg_utf8_popup) : (gg_visible|gg_utf8_popup);
-	gcd[6+j].gd.popup_msg = (unichar_t *) _("Only relevant in a truetype font, this flag indicates that this\nreference should not be translated normally, but rather its position\nshould be determined by moving the reference so that the indicated\npoint in the reference falls on top of the indicated point in the base\ncharacter.");
+	gcd[6+j].gd.flags = cv->b.sc->layers[ly_fore].order2 ? (gg_enabled|gg_visible) : (gg_visible);
+	gcd[6+j].gd.popup_msg = _("Only relevant in a truetype font, this flag indicates that this\nreference should not be translated normally, but rather its position\nshould be determined by moving the reference so that the indicated\npoint in the reference falls on top of the indicated point in the base\ncharacter.");
 	varray[l++] = &gcd[6+j];
 	gcd[6+j++].creator = GLabelCreate;
 
@@ -444,8 +455,8 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text_in_resource = true;
 	gcd[6+j].gd.label = &label[6+j];
 	gcd[6+j].gd.pos.x = 8; gcd[6+j].gd.pos.y = gcd[6+j-1].gd.pos.y+19;
-	gcd[6+j].gd.flags = cv->b.sc->layers[ly_fore].order2 ? (gg_enabled|gg_visible|gg_utf8_popup) : (gg_visible|gg_utf8_popup);
-	gcd[6+j].gd.popup_msg = (unichar_t *) _("Only relevant in a truetype font, this flag indicates that this\nreference should not be translated normally, but rather its position\nshould be determined by moving the reference so that the indicated\npoint in the reference falls on top of the indicated point in the base\ncharacter.");
+	gcd[6+j].gd.flags = cv->b.sc->layers[ly_fore].order2 ? (gg_enabled|gg_visible) : (gg_visible);
+	gcd[6+j].gd.popup_msg = _("Only relevant in a truetype font, this flag indicates that this\nreference should not be translated normally, but rather its position\nshould be determined by moving the reference so that the indicated\npoint in the reference falls on top of the indicated point in the base\ncharacter.");
 	harray1[0] = &gcd[6+j];
 	gcd[6+j++].creator = GLabelCreate;
 
@@ -468,7 +479,7 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	gcd[6+j].gd.label = &label[6+j];
 	gcd[6+j].gd.pos.x = 95; gcd[6+j].gd.pos.y = gcd[6+j-2].gd.pos.y;
 	gcd[6+j].gd.flags = gcd[6+j-1].gd.flags;
-	gcd[6+j].gd.popup_msg = (unichar_t *) _("Only relevant in a truetype font, this flag indicates that this\nreference should not be translated normally, but rather its position\nshould be determined by moving the reference so that the indicated\npoint in the reference falls on top of the indicated point in the base\ncharacter.");
+	gcd[6+j].gd.popup_msg = _("Only relevant in a truetype font, this flag indicates that this\nreference should not be translated normally, but rather its position\nshould be determined by moving the reference so that the indicated\npoint in the reference falls on top of the indicated point in the base\ncharacter.");
 	harray1[2] = &gcd[6+j];
 	gcd[6+j++].creator = GLabelCreate;
 
@@ -503,7 +514,7 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text = (unichar_t *) _("Bounding Box:");
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[6+j].gd.flags = gg_enabled|gg_visible;
 	gcd[6+j].creator = GLabelCreate;
 	varray[l++] = &gcd[6+j];
 	++j;
@@ -513,14 +524,14 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text = (unichar_t *) _("Min");
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[6+j].gd.flags = gg_enabled|gg_visible;
 	gcd[6+j].creator = GLabelCreate;
 	hvarray2[0][2] = &gcd[6+j++];
 
 	label[6+j].text = (unichar_t *) _("Max");
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[6+j].gd.flags = gg_enabled|gg_visible;
 	gcd[6+j].creator = GLabelCreate;
 	hvarray2[0][3] = &gcd[6+j++]; hvarray2[0][4] = GCD_Glue; hvarray2[0][5] = NULL;
 
@@ -530,14 +541,14 @@ static void RefGetInfo(CharView *cv, RefChar *ref) {
 	label[6+j].text = (unichar_t *) _("X:");
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[6+j].gd.flags = gg_enabled|gg_visible;
 	gcd[6+j].creator = GLabelCreate;
 	hvarray2[1][1] = &gcd[6+j++];
 
 	label[6+j].text = (unichar_t *) _("Y:");
 	label[6+j].text_is_1byte = true;
 	gcd[6+j].gd.label = &label[6+j];
-	gcd[6+j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[6+j].gd.flags = gg_enabled|gg_visible;
 	gcd[6+j].creator = GLabelCreate;
 	hvarray2[2][1] = &gcd[6+j++];
 
@@ -1308,7 +1319,7 @@ static int ai_e_h(GWindow gw, GEvent *event) {
 	AI_DoCancel( GDrawGetUserData(gw));
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("getinfo.html");
+	    help("ui/dialogs/getinfo.html", NULL);
 return( true );
 	}
 return( false );
@@ -1745,27 +1756,6 @@ static void PI_DoCancel(GIData *ci) {
     SCUpdateAll(cv->b.sc);
 }
 
-static int pi_e_h(GWindow gw, GEvent *event) {
-    if ( event->type==et_close ) {
-	GIData  *d = GDrawGetUserData(gw);
-	if( d->nonmodal ) {
-	    PI_Destroy((struct dlistnode *)d);
-	} else {
-	    PI_DoCancel( GDrawGetUserData(gw));
-	}
-    } else if ( event->type==et_char ) {
-	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("getinfo.html");
-return( true );
-	}
-return( false );
-    } else if ( event->type == et_map ) {
-	/* Above palettes */
-	GDrawRaise(gw);
-    }
-return( true );
-}
-
 static void PIFillup(GIData *ci, int except_cid);
 
 static void PI_FigureNext(GIData *ci) {
@@ -1861,32 +1851,49 @@ void PI_Destroy(struct dlistnode *node) {
     free(d);
 }
 
-static void PI_Close(GGadget *g) {
-    GWindow gw = GGadgetGetWindow(g);
-    GIData  *d = GDrawGetUserData(gw);
+static void PI_Close(GIData *d) {
     PI_Destroy((struct dlistnode *)d);
 }
 
 static int PI_Cancel(GGadget *g, GEvent *e) {
     if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
-	PI_DoCancel( GDrawGetUserData(GGadgetGetWindow(g)));
-	PI_Close(g);
+	GIData *d = GDrawGetUserData(GGadgetGetWindow(g));
+	PI_DoCancel(d);
+	PI_Close(d);
     }
 return( true );
 }
 
-static int PI_Ok(GGadget *g, GEvent *e) {
-    if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
-	GIData *ci = GDrawGetUserData(GGadgetGetWindow(g));
-
+static void PI_DoOk(GIData *ci) {
 	PI_FixStuff(ci);
 	_PI_ShowHints(ci,false);
 
 	ci->done = true;
 	/* All the work has been done as we've gone along */
-	PI_Close(g);
-    }
+	PI_Close(ci);
+}
 
+static int PI_Ok(GGadget *g, GEvent *e) {
+    if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
+	GIData *ci = GDrawGetUserData(GGadgetGetWindow(g));
+	PI_DoOk(ci);
+    }
+    return( true );
+}
+
+static int pi_e_h(GWindow gw, GEvent *event) {
+    if ( event->type==et_close ) {
+	PI_DoOk(GDrawGetUserData(gw));
+    } else if ( event->type==et_char ) {
+	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
+	    help("ui/dialogs/getinfo.html", NULL);
+return( true );
+	}
+return( false );
+    } else if ( event->type == et_map ) {
+	/* Above palettes */
+	GDrawRaise(gw);
+    }
 return( true );
 }
 
@@ -2656,6 +2663,7 @@ return( ti );
 }
 
 static void PointGetInfo(CharView *cv, SplinePoint *sp, SplinePointList *spl) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     GIData* gi = 0;
     GRect pos;
     GWindowAttrs wattrs;
@@ -2701,8 +2709,8 @@ static void PointGetInfo(CharView *cv, SplinePoint *sp, SplinePointList *spl) {
 	wattrs.is_dlg = true;
 	pos.width = GGadgetScale(GDrawPointsToPixels(NULL,PI_Width));
 	pos.height = GDrawPointsToPixels(NULL,PI_Height);
-	pt.x = cv->xoff + rint(sp->me.x*cv->scale);
-	pt.y = -cv->yoff + cv->height - rint(sp->me.y*cv->scale);
+	pt.x = tab->xoff + rint(sp->me.x*tab->scale);
+	pt.y = -tab->yoff + cv->height - rint(sp->me.y*tab->scale);
 	GDrawTranslateCoordinates(cv->v,root,&pt);
 	if ( pt.x+20+pos.width<=screensize.width )
 	    pos.x = pt.x+20;
@@ -3011,8 +3019,8 @@ static void PointGetInfo(CharView *cv, SplinePoint *sp, SplinePointList *spl) {
 	label[j].text_is_1byte = true;
 	gcd[j].gd.label = &label[j];
 	gcd[j].gd.pos.x = 130; gcd[j].gd.pos.y = gcd[j-1].gd.pos.y;
-	gcd[j].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
-	gcd[j].gd.popup_msg = (unichar_t *) _("This is the difference of the curvature between\nthe next and previous splines. Contours often\nlook nicer as this number approaches 0." );
+	gcd[j].gd.flags = gg_enabled|gg_visible;
+	gcd[j].gd.popup_msg = _("This is the difference of the curvature between\nthe next and previous splines. Contours often\nlook nicer as this number approaches 0." );
 	gcd[j].gd.cid = CID_DeltaCurvature;
 	gcd[j].creator = GLabelCreate;
 	hvarray2[l++] = &gcd[j]; hvarray2[l++] = GCD_ColSpan; hvarray2[l++] = NULL;
@@ -3330,7 +3338,6 @@ static void PointGetInfo(CharView *cv, SplinePoint *sp, SplinePointList *spl) {
 
 	GHVBoxFitWindow(mb[0].ret);
 
-	gi->nonmodal = 1;
 	dlist_pushfront( &cv->pointInfoDialogs, (struct dlistnode *)gi );
 	GWidgetHidePalettes();
 	GDrawResize(gi->gw,
@@ -3454,18 +3461,38 @@ static int PI_SpiroChanged(GGadget *g, GEvent *e) {
 return( true );
 }
 
+static void PI_SpiroDoOk(GIData *ci) {
+	ci->done = true;
+	/* All the work has been done as we've gone along */
+	PI_Close(ci);
+}
+
 static int PI_SpiroOk(GGadget *g, GEvent *e) {
     if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
 	GIData *ci = GDrawGetUserData(GGadgetGetWindow(g));
+	PI_SpiroDoOk(ci);
+    }
+    return( true );
+}
 
-	ci->done = true;
-	/* All the work has been done as we've gone along */
-	PI_Close(g);
+static int spi_e_h(GWindow gw, GEvent *event) {
+    if ( event->type==et_close ) {
+	PI_SpiroDoOk(GDrawGetUserData(gw));
+    } else if ( event->type==et_char ) {
+	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
+	    help("ui/dialogs/getinfo.html", NULL);
+return( true );
+	}
+return( false );
+    } else if ( event->type == et_map ) {
+	/* Above palettes */
+	GDrawRaise(gw);
     }
 return( true );
 }
 
 static void SpiroPointGetInfo(CharView *cv, spiro_cp *scp, SplinePointList *spl) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     GIData *gip = calloc(1, sizeof(GIData));
     GRect pos;
     GWindowAttrs wattrs;
@@ -3500,8 +3527,8 @@ static void SpiroPointGetInfo(CharView *cv, spiro_cp *scp, SplinePointList *spl)
 	wattrs.is_dlg = true;
 	pos.width = GGadgetScale(GDrawPointsToPixels(NULL,PI_Width));
 	pos.height = GDrawPointsToPixels(NULL,PI_Height);
-	pt.x = cv->xoff + rint(scp->x*cv->scale);
-	pt.y = -cv->yoff + cv->height - rint(scp->y*cv->scale);
+	pt.x = tab->xoff + rint(scp->x*tab->scale);
+	pt.y = -tab->yoff + cv->height - rint(scp->y*tab->scale);
 	GDrawTranslateCoordinates(cv->v,root,&pt);
 	if ( pt.x+20+pos.width<=screensize.width )
 	    pos.x = pt.x+20;
@@ -3511,7 +3538,7 @@ static void SpiroPointGetInfo(CharView *cv, spiro_cp *scp, SplinePointList *spl)
 	if ( pos.y+pos.height+20 > screensize.height )
 	    pos.y = screensize.height - pos.height - 20;
 	if ( pos.y<0 ) pos.y = 0;
-	gip->gw = GDrawCreateTopWindow(NULL,&pos,pi_e_h,gip,&wattrs);
+	gip->gw = GDrawCreateTopWindow(NULL,&pos,spi_e_h,gip,&wattrs);
 
 	memset(&gcd,0,sizeof(gcd));
 	memset(&label,0,sizeof(label));

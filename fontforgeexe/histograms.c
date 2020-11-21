@@ -24,16 +24,20 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autohint.h"
+#include "dumppfa.h"
+#include "ffglib.h"
 #include "fontforgeui.h"
+#include "gkeysym.h"
 #include "psfont.h"
-#include <ustring.h>
-#include <gkeysym.h>
-#include <utype.h>
+#include "splineutil.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
-#include "psfont.h"
-#include <ffglib.h>
-#include <glib/gprintf.h>
-#include "xvasprintf.h"
 
 /* This operations are designed to work on a single font. NOT a CID collection*/
 /*  A CID collection must be treated one sub-font at a time */
@@ -396,7 +400,7 @@ return;
 	GGadgetSetVisible(GWidgetGetControl(hist->gw,CID_BlueMsg),hist->is_pending);
     } else { /* HStem and VStem */
 	if ( !( e->u.mouse.state&ksm_shift )) {
-	    new = xasprintf( "[%d]", x );
+	    new = smprintf( "[%d]", x );
 	    GGadgetSetTitle8( GWidgetGetControl( hist->gw, CID_MainVal ), new );
 	    GGadgetSetTitle8( GWidgetGetControl( hist->gw, CID_SecondaryVal ), new );
 	} else {
@@ -588,7 +592,7 @@ static int leftside_e_h(GWindow gw, GEvent *event) {
     switch ( event->type ) {
       case et_char:
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("histogram.html");
+	    help("ui/dialogs/histogram.html", NULL);
 return( true );
 	}
 return( false );
@@ -610,7 +614,7 @@ static int rightside_e_h(GWindow gw, GEvent *event) {
     switch ( event->type ) {
       case et_char:
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("histogram.html");
+	    help("ui/dialogs/histogram.html", NULL);
 return( true );
 	}
 return( false );
@@ -632,7 +636,7 @@ static int histogram_e_h(GWindow gw, GEvent *event) {
     switch ( event->type ) {
       case et_char:
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("histogram.html");
+	    help("ui/dialogs/histogram.html", NULL);
 return( true );
 	}
 return( false );
@@ -662,7 +666,7 @@ static int hist_e_h(GWindow gw, GEvent *event) {
 	hist->done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("histogram.html");
+	    help("ui/dialogs/histogram.html", NULL);
 return( true );
 	}
 return( false );

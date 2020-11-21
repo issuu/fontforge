@@ -24,17 +24,27 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "dumppfa.h"
+#include "encoding.h"
 #include "fontforge.h"
+#include "gfile.h"
+#include "gutils.h"
+#include "parsettf.h"
+#include "psfont.h"
+#include "psread.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ustring.h>
-#include <utype.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include "psfont.h"
-#include <locale.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 struct fontparse {
     FontDict *fd, *mainfd;
@@ -1049,7 +1059,7 @@ static void InitChars(struct pschars *chars,char *line) {
     chars->cnt = strtol(line,NULL,10);
     if ( chars->cnt>0 ) {
 	chars->keys = calloc(chars->cnt,sizeof(char *));
-	chars->values = calloc(chars->cnt,sizeof(char *));
+	chars->values = calloc(chars->cnt,sizeof(uint8 *));
 	chars->lens = calloc(chars->cnt,sizeof(int));
 	ff_progress_change_total(chars->cnt);
     }
@@ -1357,7 +1367,7 @@ static void sfnts2tempfile(struct fontparse *fp,FILE *in,char *line) {
     int complained = false;
     int ch=0;
 
-    fp->sfnts = tmpfile();
+    fp->sfnts = GFileTmpfile();
 
     /* first finish off anything in the current line */
     while ( (pt=strpbrk(line,"<]" ))!=NULL ) {
@@ -2449,7 +2459,7 @@ static void figurecids(struct fontparse *fp,FILE *temp) {
 		(sdbytes=strtol(ssdbytes,NULL,10))>0 &&
 		(subrcnt=strtol(ssubrcnt,NULL,10))>0 ) {
 	    private->subrs->cnt = subrcnt;
-	    private->subrs->values = calloc(subrcnt,sizeof(char *));
+	    private->subrs->values = calloc(subrcnt,sizeof(uint8 *));
 	    private->subrs->lens = calloc(subrcnt,sizeof(int));
 	    leniv = private->leniv;
 	    offsets = malloc((subrcnt+1)*sizeof(int));
@@ -2612,7 +2622,7 @@ return;
 		parseline(fp,buffer,in);
 	}
     } else if (( fp->fd->fonttype==42 || fp->fd->cidfonttype==2 ) && fp->sfnts!=NULL ) {
-	fp->fd->sf = _SFReadTTF(fp->sfnts,0,0,"<Temp File>",fp->fd);
+	fp->fd->sf = _SFReadTTF(fp->sfnts,0,0,"<Temp File>",NULL,fp->fd);
 	fclose(fp->sfnts);
     }
 }
@@ -2622,7 +2632,7 @@ FontDict *_ReadPSFont(FILE *in) {
     struct fontparse fp;
     struct stat b;
 
-    temp = tmpfile();
+    temp = GFileTmpfile();
     if ( temp==NULL ) {
 	LogError( _("Cannot open a temporary file\n") );
 	fclose(in); 
@@ -2641,8 +2651,8 @@ return(NULL);
     fclose(temp);
 
     if ( fstat(fileno(in),&b)!=-1 ) {
-	fp.fd->modificationtime = b.st_mtime;
-	fp.fd->creationtime = b.st_mtime;
+	fp.fd->modificationtime = GetST_MTime(b);
+	fp.fd->creationtime = GetST_MTime(b);
     }
 return( fp.fd );
 }

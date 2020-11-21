@@ -24,11 +24,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autowidth2.h"
 #include "fontforgeui.h"
+#include "gkeysym.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
-#include <ustring.h>
-#include <utype.h>
-#include <gkeysym.h>
 
 static int width_last_em_size=1000;
 static int width_separation=150;
@@ -101,7 +106,7 @@ static int AW2_e_h(GWindow gw, GEvent *event) {
     } else if ( event->type == et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
 	    /*struct widthinfo *wi = GDrawGetUserData(gw);*/
-	    help("autowidth.html#AutoWidth");
+	    help("ui/dialogs/autowidth.html", NULL);
 return( true );
 	}
 return( false );
@@ -194,11 +199,10 @@ void FVAutoWidth2(FontView *fv) {
     gcd[i++].creator = GLabelCreate;
     harray2[0] = &gcd[i-1];
 
-#define PI	3.1415926535897932
     if ( sf->italicangle<0 )
-	sprintf( minbuf, "%d", (int) rint( sf->descent*tan(sf->italicangle*PI/180 )) );
+	sprintf( minbuf, "%d", (int) rint( sf->descent*tan(sf->italicangle*FF_PI/180 )) );
     else if ( sf->italicangle>0 )
-	sprintf( minbuf, "%d", (int) -rint( sf->ascent*tan(sf->italicangle*PI/180 )) );
+	sprintf( minbuf, "%d", (int) -rint( sf->ascent*tan(sf->italicangle*FF_PI/180 )) );
     else
 	sprintf( minbuf, "%d", (int) rint( width_min_side_bearing * emsize / width_last_em_size ));
     label[i].text = (unichar_t *) minbuf;

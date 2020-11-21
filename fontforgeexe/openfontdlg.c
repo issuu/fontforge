@@ -25,17 +25,31 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "fontforgeui.h"
+#include "namelist.h"
+#include "scripting.h"
+
+#include "gdraw.h"
+#include "ggadget.h"
+#include "gwidget.h"
+#include "ustring.h"
+
 #include <stdlib.h>
 #include <string.h>
-#include <ustring.h>
-#include <gdraw.h>
-#include <gwidget.h>
-#include <ggadget.h>
 
 extern NameList *force_names_when_opening;
 int default_font_filter_index=0;
 struct openfilefilters *user_font_filters = NULL;
+
+#ifdef FONTFORGE_CAN_USE_WOFF2
+/* GGadgetWildMatch is buggy... it must be woff2 then woff */
+#  define WOFF_EXT ",woff2,woff"
+#else
+#  define WOFF_EXT ",woff"
+#endif
 
 struct openfilefilters def_font_filters[] = {
     {
@@ -55,9 +69,6 @@ struct openfilefilters def_font_filters[] = {
 	   "cff,"
 	   "cef,"
 	   "gai,"
-#ifndef _NO_LIBPNG
-	   "woff,"
-#endif
 	   "svg,"
 	   "ufo,"
 	   "pf3,"
@@ -77,6 +88,7 @@ struct openfilefilters def_font_filters[] = {
 /* I used to say "*gf" but that also matched xgf (xgridfit) files -- which ff can't open */
 	   "[0-9]*gf,"
 	   "pdb"
+	   WOFF_EXT
         "}"
         /* With any of these methods of compression */
 	"{.gz,.Z,.bz2,.lzma,}"
@@ -95,9 +107,6 @@ struct openfilefilters def_font_filters[] = {
 	   "cff,"
 	   "cef,"
 	   "gai,"
-#ifndef _NO_LIBPNG
-	   "woff,"
-#endif
 	   "svg,"
 	   "ufo,"
 	   "pf3,"
@@ -109,6 +118,7 @@ struct openfilefilters def_font_filters[] = {
 	   "dfont,"
 	   "mf,"
 	   "ik"
+	   WOFF_EXT
 	"}"
 	"{.gz,.Z,.bz2,.lzma,}"
     },
@@ -132,11 +142,7 @@ struct openfilefilters def_font_filters[] = {
     { NU_("ΤεΧ Bitmap Fonts"), "*{pk,gf}" },
     { N_("PostScript"), "*.{pfa,pfb,t42,otf,cef,cff,gai,pf3,pt3,gsf,cid}{.gz,.Z,.bz,.bz2,.lzma,}" },
     { N_("TrueType"), "*.{ttf,t42,ttc}{.gz,.Z,.bz,.bz2,.lzma,}" },
-#ifdef _NO_LIBPNG
-    { N_("OpenType"), "*.{ttf,otf}{.gz,.Z,.bz,.bz2,.lzma,}" },
-#else
-    { N_("OpenType"), "*.{ttf,otf,woff}{.gz,.Z,.bz,.bz2,.lzma,}" },
-#endif
+    { N_("OpenType"), "*.{ttf,otf" WOFF_EXT "}{.gz,.Z,.bz,.bz2,.lzma,}" },
     { N_("Type1"), "*.{pfa,pfb,gsf,cid}{.gz,.Z,.bz2,.lzma,}" },
     { N_("Type2"), "*.{otf,cef,cff,gai}{.gz,.Z,.bz2,.lzma,}" },
     { N_("Type3"), "*.{pf3,pt3}{.gz,.Z,.bz2,.lzma,}" },
@@ -457,7 +463,7 @@ static int GFD_Ok(GGadget *g, GEvent *e) {
 return(true);
 	    }
 	    d->done = true;
-	    d->ret = u_GFileNormalizePath(GGadgetGetTitle(d->gfc));
+	    d->ret = GGadgetGetTitle(d->gfc);
 
 	    // Trim trailing '/' if its there and put that string back as
 	    // the d->gfc string.
@@ -468,7 +474,7 @@ return(true);
 		    tmp[ tmplen-1 ] = '\0';
 		    GGadgetSetTitle(d->gfc, tmp);
 		    free(tmp);
-		    d->ret = u_GFileNormalizePath(GGadgetGetTitle(d->gfc));
+		    d->ret = GGadgetGetTitle(d->gfc);
 		}
 	    }
 	}
@@ -606,7 +612,7 @@ return( GGadgetDispatchEvent((GGadget *) (d->gfc),event));
 return( event->type!=et_char );
 }
 
-unichar_t *FVOpenFont(char *title, const char *defaultfile, int mult) {
+static unichar_t *FVOpenFont(char *title, const char *defaultfile, bool mult, bool modal) {
     GRect pos;
     int i, filter, renamei;
     GWindow gw;
@@ -624,13 +630,18 @@ unichar_t *FVOpenFont(char *title, const char *defaultfile, int mult) {
     memset(&d,'\0',sizeof(d));
 
     memset(&wattrs,0,sizeof(wattrs));
-    wattrs.mask = wam_events|wam_cursor|wam_utf8_wtitle|wam_undercursor|wam_isdlg|wam_restrict;
+    if (modal) {
+        wattrs.mask = wam_events|wam_cursor|wam_utf8_wtitle|wam_undercursor|wam_isdlg|wam_restrict;
+        wattrs.restrict_input_to_me = 1;
+        wattrs.is_dlg = true;
+        wattrs.undercursor = 1;
+    } else {
+        wattrs.mask = wam_events|wam_cursor|wam_utf8_wtitle;
+    }
     wattrs.event_masks = ~(1<<et_charup);
-    wattrs.restrict_input_to_me = 1;
-    wattrs.is_dlg = true;
-    wattrs.undercursor = 1;
     wattrs.cursor = ct_pointer;
     wattrs.utf8_window_title = title;
+
     pos.x = pos.y = 0;
 
     totwid = GGadgetScale(295);
@@ -658,14 +669,14 @@ unichar_t *FVOpenFont(char *title, const char *defaultfile, int mult) {
     label[i].text_is_1byte = true;
     gcd[i].gd.label = &label[i];
     gcd[i].gd.pos.x = 8; gcd[i].gd.pos.y = 188+6;
-    gcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[i].gd.popup_msg = (unichar_t *) _("Display files of this type" );
+    gcd[i].gd.flags = gg_visible | gg_enabled;
+    gcd[i].gd.popup_msg = _("Display files of this type" );
     harray1[0] = GCD_Glue; harray1[1] = &gcd[i];
     gcd[i++].creator = GLabelCreate;
 
     gcd[i].gd.pos.x = 0; gcd[i].gd.pos.y = gcd[i-1].gd.pos.y-6;
-    gcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[i].gd.popup_msg = (unichar_t *) _("Display files of this type");
+    gcd[i].gd.flags = gg_visible | gg_enabled;
+    gcd[i].gd.popup_msg = _("Display files of this type");
     gcd[i].gd.handle_controlevent = GFD_FilterSelected;
     harray1[2] = &gcd[i]; harray1[3] = GCD_Glue; harray1[4] = GCD_Glue; harray1[5] = GCD_Glue; harray1[6] = NULL;
     gcd[i++].creator = GListButtonCreate;
@@ -679,15 +690,15 @@ unichar_t *FVOpenFont(char *title, const char *defaultfile, int mult) {
     label[i].text_is_1byte = true;
     gcd[i].gd.label = &label[i];
     gcd[i].gd.pos.x = 8; gcd[i].gd.pos.y = 188+6;
-    gcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[i].gd.popup_msg = (unichar_t *) _("In the saved font, force all glyph names to match those in the specified namelist");
+    gcd[i].gd.flags = gg_visible | gg_enabled;
+    gcd[i].gd.popup_msg = _("In the saved font, force all glyph names to match those in the specified namelist");
     harray2[0] = &gcd[i];
     gcd[i++].creator = GLabelCreate;
 
     renamei = i;
     gcd[i].gd.pos.x = 0; gcd[i].gd.pos.y = gcd[i-1].gd.pos.y-6;
-    gcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[i].gd.popup_msg = (unichar_t *) _("In the saved font, force all glyph names to match those in the specified namelist");
+    gcd[i].gd.flags = gg_visible | gg_enabled;
+    gcd[i].gd.popup_msg = _("In the saved font, force all glyph names to match those in the specified namelist");
     gcd[i].creator = GListButtonCreate;
     nlnames = AllNamelistNames();
     for ( cnt=0; nlnames[cnt]!=NULL; ++cnt);
@@ -822,3 +833,17 @@ unichar_t *FVOpenFont(char *title, const char *defaultfile, int mult) {
     free(nlnames);
 return(d.ret);
 }
+
+char *GetPostScriptFontName(char *dir, bool mult, bool modal) {
+    unichar_t *ret;
+    char *u_dir;
+    char *temp;
+
+    u_dir = def2utf8_copy(dir);
+    ret = FVOpenFont(_("Open Font"), u_dir, mult, modal);
+    temp = u2def_copy(ret);
+
+    free(ret);
+return( temp );
+}
+

@@ -24,7 +24,17 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
+#include "splinefit.h"
+#include "splineorder2.h"
+#include "splinestroke.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+
 #include <math.h>
 
 #undef DEBUG_FREEHAND
@@ -68,12 +78,13 @@ static void TraceDataFree(TraceData *td) {
 }
 
 static void TraceDataFromEvent(CharView *cv, GEvent *event) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     TraceData *new;
     int skiplast;
 
     if ( cv->freehand.head!=NULL &&
-	    cv->freehand.last->here.x==(event->u.mouse.x-cv->xoff)/cv->scale &&
-	    cv->freehand.last->here.y==(cv->height-event->u.mouse.y-cv->yoff)/cv->scale ) {
+	    cv->freehand.last->here.x==(event->u.mouse.x-tab->xoff)/tab->scale &&
+	    cv->freehand.last->here.y==(cv->height-event->u.mouse.y-tab->yoff)/tab->scale ) {
 	/* Has not moved */
 	int constrained = (event->u.mouse.state&ksm_shift)?1:0;
 	if ( constrained != cv->freehand.last->wasconstrained )
@@ -84,8 +95,8 @@ return;
     /* I sometimes seem to get events out of order on the wacom */
     skiplast = false;
     if ( cv->freehand.last!=NULL && cv->freehand.last->prev!=NULL ) {
-	int x = (event->u.mouse.x-cv->xoff)/cv->scale;
-	int y = (cv->height-event->u.mouse.y-cv->yoff)/cv->scale;
+	int x = (event->u.mouse.x-tab->xoff)/tab->scale;
+	int y = (cv->height-event->u.mouse.y-tab->yoff)/tab->scale;
 	TraceData *bad = cv->freehand.last, *base = bad->prev;
 
 	if ( ((bad->here.x < x-15 && bad->here.x < base->here.x-15) ||
@@ -109,8 +120,8 @@ return;
 	}
     }
 
-    new->here.x = (event->u.mouse.x-cv->xoff)/cv->scale;
-    new->here.y = (cv->height-event->u.mouse.y-cv->yoff)/cv->scale;
+    new->here.x = (event->u.mouse.x-tab->xoff)/tab->scale;
+    new->here.y = (cv->height-event->u.mouse.y-tab->yoff)/tab->scale;
     new->time = event->u.mouse.time;
     new->pressure = event->u.mouse.pressure;
     new->xtilt = event->u.mouse.xtilt;
@@ -361,10 +372,10 @@ static void TraceMassage(TraceData *head, TraceData *end) {
 		/* We've got tangent corner tangent */
 		pangle = atan2(npt->y-pt->y,npt->x-pt->x);
 		nangle = atan2(nnpt->y-npt->y,nnpt->x-npt->x);
-		if ( pangle<0 && nangle>0 && nangle-pangle>=3.1415926 )
-		    pangle += 2*3.1415926535897932;
-		else if ( pangle>0 && nangle<0 && pangle-nangle>=3.1415926 )
-		    nangle += 2*3.1415926535897932;
+		if ( pangle<0 && nangle>0 && nangle-pangle>=FF_PI )
+		    pangle += 2*FF_PI;
+		else if ( pangle>0 && nangle<0 && pangle-nangle>=FF_PI )
+		    nangle += 2*FF_PI;
 		if ( nangle-pangle<1 && nangle-pangle>-1 ) {
 		    for (;;) {
 			pt->online = pt->use_as_pt = false;
@@ -390,7 +401,7 @@ static bigreal Trace_Factor(void *_cv,Spline *spline, real t) {
     StrokeInfo *si = CVFreeHandInfo();
     int p;
 
-    if ( si->radius<=0 || si->pressure1==si->pressure2 )
+    if ( si->width<=0 || si->pressure1==si->pressure2 )
 return( 1.0 );
 
     for ( pt = head; pt!=NULL; pt=pt->next ) {
@@ -415,15 +426,15 @@ return( 1.0 );
 	if ( si->pressure1<si->pressure2 )
 return( 1.0 );
 	else
-return( si->radius2/si->radius );
+return( si->radius2/(si->width/2) );
     } else if ( p>=si->pressure1 && p>=si->pressure2 ) {
 	if ( si->pressure1<si->pressure2 )
-return( si->radius2/si->radius );
+return( si->radius2/(si->width/2) );
 	else
 return( 1.0 );
     } else
-return( ((p-si->pressure1)*si->radius2 + (si->pressure2-p)*si->radius)/
-		(si->radius*(si->pressure2-si->pressure1)) );
+return( ((p-si->pressure1)*si->radius2 + (si->pressure2-p)*(si->width/2))/
+		((si->width/2)*(si->pressure2-si->pressure1)) );
 }
 
 static void TraceFigureCPs(SplinePoint *last,SplinePoint *cur,TraceData *tlast,TraceData *tcur) {
@@ -465,11 +476,12 @@ static void TraceFigureCPs(SplinePoint *last,SplinePoint *cur,TraceData *tlast,T
 }
 
 static SplineSet *TraceCurve(CharView *cv) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     TraceData *head = cv->freehand.head, *pt, *base, *e;
     SplineSet *spl;
     SplinePoint *last, *cur;
     int cnt, i, tot;
-    TPoint *mids;
+    FitPoint *mids;
     double len,sofar;
     StrokeInfo *si;
 
@@ -485,8 +497,8 @@ static SplineSet *TraceCurve(CharView *cv) {
 	pt->online = pt->wasconstrained;
 	pt->use_as_pt = pt->constrained_corner;
 	/* We recalculate x,y because we might have autoscrolled the window */
-	pt->x =  cv->xoff + rint(pt->here.x*cv->scale);
-	pt->y = -cv->yoff + cv->height - rint(pt->here.y*cv->scale);
+	pt->x =  tab->xoff + rint(pt->here.x*tab->scale);
+	pt->y = -tab->yoff + cv->height - rint(pt->here.y*tab->scale);
 	pt->num = cnt++;
     }
     head->use_as_pt = cv->freehand.last->use_as_pt = true;
@@ -518,10 +530,10 @@ static SplineSet *TraceCurve(CharView *cv) {
     TraceMassage(head,cv->freehand.last);
 
     /* Calculate the mids array */
-    mids = malloc(cnt*sizeof(TPoint));
+    mids = malloc(cnt*sizeof(FitPoint));
     for ( base=head; base!=NULL && base->next!=NULL; base = pt ) {
-	mids[base->num].x = base->here.x;
-	mids[base->num].y = base->here.y;
+	mids[base->num].p.x = base->here.x;
+	mids[base->num].p.y = base->here.y;
 	mids[base->num].t = 0;
 	len = 0;
 	if ( base->next->online ) {
@@ -540,8 +552,8 @@ static SplineSet *TraceCurve(CharView *cv) {
 	    sofar += sqrt((double) (
 		    (pt->x-pt->prev->x)*(pt->x-pt->prev->x) +
 		    (pt->y-pt->prev->y)*(pt->y-pt->prev->y) ));
-	    mids[pt->num].x = pt->here.x;
-	    mids[pt->num].y = pt->here.y;
+	    mids[pt->num].p.x = pt->here.x;
+	    mids[pt->num].p.y = pt->here.y;
 	    mids[pt->num].t = sofar/len;
 	    if ( pt->use_as_pt )
 	break;
@@ -677,10 +689,10 @@ return;
 		sin(langle)*hlen;
 	trace->first->prevcp = oldp;
     } else {
-	if ( hangle>3.1415926535897932/2 && langle<-3.1415926535897932/2 )
-	    langle += 2*3.1415926535897932;
-	if ( hangle<-3.1415926535897932/2 && langle>3.1415926535897932/2 )
-	    hangle += 2*3.1415926535897932;
+	if ( hangle>FF_PI/2 && langle<-FF_PI/2 )
+	    langle += 2*FF_PI;
+	if ( hangle<-FF_PI/2 && langle>FF_PI/2 )
+	    hangle += 2*FF_PI;
 	hangle = (hangle+langle)/2;
 	dx = cos(hangle);
 	dy = sin(hangle);
@@ -717,6 +729,7 @@ void CVMouseDownFreeHand(CharView *cv, GEvent *event) {
 }
 
 void CVMouseMoveFreeHand(CharView *cv, GEvent *event) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     double dx, dy;
     SplinePoint *last;
     BasePoint *here;
@@ -729,7 +742,7 @@ void CVMouseMoveFreeHand(CharView *cv, GEvent *event) {
     here = &cv->freehand.last->here;
     if ( (dx=here->x-last->me.x)<0 ) dx = -dx;
     if ( (dy=here->y-last->me.y)<0 ) dy = -dy;
-    if ( (dx+dy)*cv->scale > 4 ) {
+    if ( (dx+dy)*tab->scale > 4 ) {
 	SplineMake3(last,SplinePointCreate(rint(here->x),rint(here->y)));
 	cv->freehand.current_trace->last = last->next->to;
 	GDrawRequestExpose(cv->v,NULL,false);
@@ -767,6 +780,7 @@ return;
 #endif
 
 void CVMouseUpFreeHand(CharView *cv, GEvent *event) {
+    CharViewTab* tab = CVGetActiveTab(cv);
     TraceData *head = cv->freehand.head;
     TraceData *last;
     double dx, dy;
@@ -789,7 +803,7 @@ return;
 	if ( (dx=head->x-last->x)<0 ) dx = -dx;
 	if ( (dy=head->y-last->y)<0 ) dy = -dy;
 
-	if (( event->u.chr.state&ksm_meta ) || (dx+dy)*cv->scale > 4 )
+	if (( event->u.chr.state&ksm_meta ) || (dx+dy)*tab->scale > 4 )
 	    TraceDataClose(cv,event);
 	else {
 	    SplinePointListsFree(cv->freehand.current_trace);

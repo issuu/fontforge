@@ -24,14 +24,27 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autohint.h"
+#include "cvimages.h"
+#include "cvundoes.h"
 #include "fontforge.h"
-#include <math.h>
-#include <locale.h>
-#include <ustring.h>
-#include <utype.h>
+#include "namelist.h"
 #include "psfont.h"
 #include "sd.h"
+#include "splineoverlap.h"
+#include "splinestroke.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
 #include "views.h"		/* For CharViewBase */
+
+#include <assert.h>
+#include <locale.h>
+#include <math.h>
 #ifdef HAVE_IEEEFP_H
 # include <ieeefp.h>		/* Solaris defines isnan in ieeefp rather than math.h */
 #endif
@@ -59,6 +72,12 @@ struct garbage {
     int16 cnts[GARBAGE_MAX];
 };
 
+static bigreal MinTransMag(real trans[6]) {
+    bigreal mx = sqrt(trans[0]*trans[0] + trans[1]*trans[1]);
+    bigreal my = sqrt(trans[2]*trans[2] + trans[3]*trans[3]);
+    return mx > my ? my : mx;
+}
+
 static void AddTok(GrowBuf *gb,char *buf,int islit) {
 
     if ( islit )
@@ -82,8 +101,10 @@ static void dictfree(struct pskeydict *dict) {
 
     for ( i=0; i<dict->cnt; ++i ) {
 	if ( dict->entries[i].type==ps_string || dict->entries[i].type==ps_instr ||
-		dict->entries[i].type==ps_lit )
+		dict->entries[i].type==ps_lit ) {
 	    free(dict->entries[i].u.str);
+	    dict->entries[i].u.str = NULL;
+	}
 	else if ( dict->entries[i].type==ps_array || dict->entries[i].type==ps_dict )
 	    dictfree(&dict->entries[i].u.dict);
     }
@@ -534,7 +555,7 @@ return( pt_number );
 	    }
 	} else {
 	    *val = strtod(tokbuf,&end);
-	    if ( !finite(*val) ) {
+	    if ( !isfinite(*val) ) {
 /* GT: NaN is a concept in IEEE floating point which means "Not a Number" */
 /* GT: it is used to represent errors like 0/0 or sqrt(-1). */
 		LogError( _("Bad number, infinity or nan: %s\n"), tokbuf );
@@ -685,14 +706,14 @@ return( sp );
 }
 
 static void CheckMakeB(BasePoint *test, BasePoint *good) {
-    if ( !finite(test->x) || test->x>100000 || test->x<-100000 ) {
+    if ( !isfinite(test->x) || test->x>100000 || test->x<-100000 ) {
 	LogError( _("Value out of bounds in spline.\n") );
 	if ( good!=NULL )
 	    test->x = good->x;
 	else
 	    test->x = 0;
     }
-    if ( !finite(test->y) || test->y>100000 || test->y<-100000 ) {
+    if ( !isfinite(test->y) || test->y>100000 || test->y<-100000 ) {
 	LogError( _("Value out of bounds in spline.\n") );
 	if ( good!=NULL )
 	    test->y = good->y;
@@ -720,7 +741,7 @@ static void circlearcto(real a1, real a2, real cx, real cy, real r,
 return;
 
     cplen = (a2-a1)/90 * r * .552;
-    a1 *= 3.1415926535897932/180; a2 *= 3.1415926535897932/180;
+    a1 *= FF_PI/180; a2 *= FF_PI/180;
     s1 = sin(a1); s2 = sin(a2); c1 = cos(a1); c2 = cos(a2);
     temp.x = cx+r*c2; temp.y = cy+r*s2;
     base.x = cx+r*c1; base.y = cy+r*s1;
@@ -963,13 +984,14 @@ return(nsp);
 }
 
 static Entity *EntityCreate(SplinePointList *head,int linecap,int linejoin,
-	real linewidth, real *transform, SplineSet *clippath) {
+	real linewidth, real miterlimit, real *transform, SplineSet *clippath) {
     Entity *ent = calloc(1,sizeof(Entity));
     ent->type = et_splines;
     ent->u.splines.splines = head;
     ent->u.splines.cap = linecap;
     ent->u.splines.join = linejoin;
     ent->u.splines.stroke_width = linewidth;
+    ent->u.splines.miterlimit = miterlimit;
     ent->u.splines.fill.col = 0xffffffff;
     ent->u.splines.stroke.col = 0xffffffff;
     ent->u.splines.fill.opacity = 1.0;
@@ -992,7 +1014,7 @@ static uint8 *StringToBytes(struct psstack *stackel,int *len) {
 	while ( isspace(*pt)) ++pt;
 	if ( *pt=='{' || *pt=='[' ) ++pt;
 	while ( isspace(*pt)) ++pt;
-    } else if ( stackel->type!=pt_string )
+    } else if ( stackel->type!=ps_string )
 return( NULL );
 
     upt = base = malloc(65536+1);	/* Maximum size of ps string */
@@ -1260,7 +1282,7 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
     struct graphicsstate {
 	real transform[6];
 	DBasePoint current;
-	real linewidth;
+	real linewidth, miterlimit;
 	int linecap, linejoin;
 	Color fore;
 	DashType dashes[DASH_MAX];
@@ -1272,7 +1294,8 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
     struct pskeydict dict;
     struct pskeyval *kv;
     Color fore=COLOR_INHERITED;
-    int linecap=lc_inherited, linejoin=lj_inherited; real linewidth=WIDTH_INHERITED;
+    int linecap=lc_inherited, linejoin=lj_inherited;
+    real linewidth=WIDTH_INHERITED, miterlimit=JLIMIT_INHERITED;
     DashType dashes[DASH_MAX];
     int dash_offset = 0;
     Entity *ent;
@@ -1731,18 +1754,18 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 	  case pt_atan:
 	    if ( sp>=2 && stack[sp-1].type==ps_num && stack[sp-2].type==ps_num ) {
 		stack[sp-2].u.val = atan2(stack[sp-2].u.val,stack[sp-1].u.val)*
-			180/3.1415926535897932;
+			180/FF_PI;
 		--sp;
 	    }
 	  break;
 	  case pt_sin:
 	    if ( sp>=1 && stack[sp-1].type==ps_num ) {
-		stack[sp-1].u.val = sin(stack[sp-1].u.val*3.1415926535897932/180);
+		stack[sp-1].u.val = sin(stack[sp-1].u.val*FF_PI/180);
 	    }
 	  break;
 	  case pt_cos:
 	    if ( sp>=1 && stack[sp-1].type==ps_num ) {
-		stack[sp-1].u.val = cos(stack[sp-1].u.val*3.1415926535897932/180);
+		stack[sp-1].u.val = cos(stack[sp-1].u.val*FF_PI/180);
 	    }
 	  break;
 	  case pt_if:
@@ -2078,8 +2101,8 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 		a1 = stack[sp-2].u.val;
 		a2 = stack[sp-1].u.val;
 		sp -= 5;
-		temp.x = cx+r*cos(a1/180 * 3.1415926535897932);
-		temp.y = cy+r*sin(a1/180 * 3.1415926535897932);
+		temp.x = cx+r*cos(a1/180 * FF_PI);
+		temp.y = cy+r*sin(a1/180 * FF_PI);
 		if ( temp.x!=current.x || temp.y!=current.y ||
 			!( cur!=NULL && cur->first!=NULL && (cur->first!=cur->last || cur->first->next==NULL) )) {
 		    pt = chunkalloc(sizeof(SplinePoint));
@@ -2100,8 +2123,8 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 		    }
 		}
 		circlearcsto(a1,a2,cx,cy,r,cur,transform,tok==pt_arcn);
-		current.x = cx+r*cos(a2/180 * 3.1415926535897932);
-		current.y = cy+r*sin(a2/180 * 3.1415926535897932);
+		current.x = cx+r*cos(a2/180 * FF_PI);
+		current.y = cy+r*sin(a2/180 * FF_PI);
 	    } else
 		sp = 0;
 	  break;
@@ -2165,13 +2188,13 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 			SplineMake3(cur->last,pt);
 			cur->last = pt;
 		    }
-		    a1 = 3*3.1415926535897932/2+a1;
-		    a2 = 3.1415926535897932/2+a2;
+		    a1 = 3*FF_PI/2+a1;
+		    a2 = FF_PI/2+a2;
 		    if ( !clockwise ) {
-			a1 += 3.1415926535897932;
-			a2 += 3.1415926535897932;
+			a1 += FF_PI;
+			a2 += FF_PI;
 		    }
-		    circlearcsto(a1*180/3.1415926535897932,a2*180/3.1415926535897932,
+		    circlearcsto(a1*180/FF_PI,a2*180/FF_PI,
 			    cx,cy,r,cur,transform,clockwise);
 		}
 		if ( tok==pt_arcto ) {
@@ -2397,10 +2420,11 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 		if ( tok==pt_stroke ) {
 		    ent->u.splines.cap = linecap; ent->u.splines.join = linejoin;
 		    ent->u.splines.stroke_width = linewidth;
+		    ent->u.splines.miterlimit = miterlimit;
 		    memcpy(ent->u.splines.transform,transform,sizeof(transform));
 		}
 	    } else {
-		ent = EntityCreate(head,linecap,linejoin,linewidth,transform,clippath);
+		ent = EntityCreate(head,linecap,linejoin,linewidth,miterlimit,transform,clippath);
 		ent->next = ec->splines;
 		ec->splines = ent;
 	    }
@@ -2445,6 +2469,7 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 		memcpy(gsaves[gsp].transform,transform,sizeof(transform));
 		gsaves[gsp].current = current;
 		gsaves[gsp].linewidth = linewidth;
+		gsaves[gsp].miterlimit = miterlimit;
 		gsaves[gsp].linecap = linecap;
 		gsaves[gsp].linejoin = linejoin;
 		gsaves[gsp].fore = fore;
@@ -2464,6 +2489,7 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 		memcpy(transform,gsaves[gsp].transform,sizeof(transform));
 		current = gsaves[gsp].current;
 		linewidth = gsaves[gsp].linewidth;
+		miterlimit = gsaves[gsp].miterlimit;
 		linecap = gsaves[gsp].linecap;
 		linejoin = gsaves[gsp].linejoin;
 		fore = gsaves[gsp].fore;
@@ -2505,14 +2531,13 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
 	  case pt_currentmiterlimit:
 	    /* push 10.0 (default value). I don't handle this properly */
 	    if ( sp<sizeof(stack)/sizeof(stack[0]) ) {
-		stack[sp].u.val = 10.0;
+		stack[sp].u.val = (miterlimit==JLIMIT_INHERITED?10.0:miterlimit);
 		stack[sp++].type = ps_num;
 	    }
 	  break;
 	  case pt_setmiterlimit:
-	    /* pop one item off stack */
 	    if ( sp>=1 )
-		--sp;
+		miterlimit = stack[--sp].u.val;
 	  break;
 	  case pt_currentpacking:
 	    /* push false (default value). I don't handle this properly */
@@ -2800,7 +2825,8 @@ static void _InterpretPS(IO *wrapper, EntityChar *ec, RetStack *rs) {
     }
     freestuff(stack,sp,&dict,&gb,&tofrees);
     if ( head!=NULL ) {
-	ent = EntityCreate(head,linecap,linejoin,linewidth,transform,clippath);
+	ent = EntityCreate(head,linecap,linejoin,linewidth,miterlimit,
+	                   transform,clippath);
 	ent->next = ec->splines;
 	ec->splines = ent;
     }
@@ -2873,12 +2899,13 @@ static Entity *EntityReverse(Entity *ent) {
 return( last );
 }
 
-static SplinePointList *SplinesFromLayers(SplineChar *sc,int *flags, int tostroke) {
+static SplinePointList *SplinesFromLayers(SplineChar *sc,
+                                          ImportParams *ip,
+                                          int tostroke) {
     int layer;
-    SplinePointList *head=NULL, *last, *new, *nlast, *temp, *each, *transed;
+    SplinePointList *head=NULL, *last, *nlast, *temp, *each, *transed;
     StrokeInfo si;
     /*SplineSet *spl;*/
-    int handle_eraser;
     real inversetrans[6], transform[6];
     int changed;
 
@@ -2896,71 +2923,66 @@ static SplinePointList *SplinesFromLayers(SplineChar *sc,int *flags, int tostrok
 return( head );
     }
 
-    if ( *flags==-1 )
-	*flags = PsStrokeFlagsDlg();
-
-    if ( *flags & sf_correctdir ) {
+    if ( ip->correct_direction ) {
 	for ( layer=ly_fore; layer<sc->layer_cnt; ++layer ) if ( sc->layers[layer].dofill )
 	    SplineSetsCorrect(sc->layers[layer].splines,&changed);
     }
 
-    handle_eraser = *flags & sf_handle_eraser;
-
     for ( layer=ly_fore; layer<sc->layer_cnt; ++layer ) {
 	if ( sc->layers[layer].dostroke ) {
-	    memset(&si,'\0',sizeof(si));
-	    si.join = sc->layers[layer].stroke_pen.linejoin;
-	    si.cap = sc->layers[layer].stroke_pen.linecap;
-	    si.radius = sc->layers[layer].stroke_pen.width/2.0f;
+	    InitializeStrokeInfo(&si);
+	    si.extrema = false;
+	    si.simplify = ip->simplify;
+	    SITranslatePSArgs(&si, sc->layers[layer].stroke_pen.linejoin,
+	                      sc->layers[layer].stroke_pen.linecap);
+	    si.width = sc->layers[layer].stroke_pen.width;
 	    if ( sc->layers[layer].stroke_pen.width==WIDTH_INHERITED )
-		si.radius = .5;
+		si.width = 1.0;
+	    // These are OK as lc_butt and lj_miter are unchanged by SITra()
 	    if ( si.cap == lc_inherited ) si.cap = lc_butt;
-	    if ( si.join == lc_inherited ) si.join = lj_miter;
-	    new = NULL;
+	    if ( si.join == lj_inherited ) si.join = lj_miter;
+	    // This is supposed to get temporarily set to a format-
+	    // specific default by the caller
+	    assert( ip->default_joinlimit!=JLIMIT_INHERITED );
+	    si.joinlimit = ip->default_joinlimit;
 	    memcpy(transform,sc->layers[layer].stroke_pen.trans,4*sizeof(real));
 	    transform[4] = transform[5] = 0;
 	    MatInverse(inversetrans,transform);
+	    si.accuracy_target = ip->accuracy_target*MinTransMag(inversetrans);
 	    transed = SplinePointListTransform(SplinePointListCopy(
 		    sc->layers[layer].splines),inversetrans,tpt_AllPoints);
-	    for ( each = transed; each!=NULL; each=each->next ) {
-		temp = SplineSetStroke(each,&si,sc->layers[layer].order2);
-		if ( new==NULL )
-		    new=temp;
-		else
-		    nlast->next = temp;
-		if ( temp!=NULL )
-		    for ( nlast=temp; nlast->next!=NULL; nlast=nlast->next );
-	    }
-	    new = SplinePointListTransform(new,transform,tpt_AllPoints);
+	    temp = SplineSetStroke(transed,&si,sc->layers[layer].order2);
+	    temp = SplinePointListTransform(temp,transform,tpt_AllPoints);
 	    SplinePointListsFree(transed);
-	    if ( handle_eraser && sc->layers[layer].stroke_pen.brush.col==0xffffff ) {
-		head = EraseStroke(sc,head,new);
+	    if (    ip->erasers
+	         && sc->layers[layer].stroke_pen.brush.col==0xffffff ) {
+		head = EraseStroke(sc,head,temp);
 		last = head;
 		if ( last!=NULL )
 		    for ( ; last->next!=NULL; last=last->next );
 	    } else {
 		if ( head==NULL )
-		    head = new;
+		    head = temp;
 		else
-		    last->next = new;
-		if ( new!=NULL )
-		    for ( last = new; last->next!=NULL; last=last->next );
+		    last->next = temp;
+		if ( temp!=NULL )
+		    for ( last = temp; last->next!=NULL; last=last->next );
 	    }
 	}
 	if ( sc->layers[layer].dofill ) {
-	    if ( handle_eraser && sc->layers[layer].fill_brush.col==0xffffff ) {
+	    if ( ip->erasers && sc->layers[layer].fill_brush.col==0xffffff ) {
 		head = EraseStroke(sc,head,sc->layers[layer].splines);
 		last = head;
 		if ( last!=NULL )
 		    for ( ; last->next!=NULL; last=last->next );
 	    } else {
-		new = SplinePointListCopy(sc->layers[layer].splines);
+		temp = SplinePointListCopy(sc->layers[layer].splines);
 		if ( head==NULL )
-		    head = new;
+		    head = temp;
 		else
-		    last->next = new;
-		if ( new!=NULL )
-		    for ( last = new; last->next!=NULL; last=last->next );
+		    last->next = temp;
+		if ( temp!=NULL )
+		    for ( last = temp; last->next!=NULL; last=last->next );
 	    }
 	}
     }
@@ -2970,13 +2992,16 @@ return( head );
 void SFSplinesFromLayers(SplineFont *sf,int tostroke) {
     /* User has turned off multi-layer, flatten the font */
     int i, layer;
-    int flags= -1;
     Layer *new;
     CharViewBase *cv;
+    ImportParams *ip = ImportParamsState();
+    bigreal tmpjl = ip->default_joinlimit;
+    if ( tmpjl==JLIMIT_INHERITED )
+	ip->default_joinlimit = 10.0; // PostScript default
 
     for ( i=0; i<sf->glyphcnt; ++i ) if ( sf->glyphs[i]!=NULL ) {
 	SplineChar *sc = sf->glyphs[i];
-	SplineSet *splines = SplinesFromLayers(sc,&flags,tostroke);
+	SplineSet *splines = SplinesFromLayers(sc,ip,tostroke);
 	RefChar *head=NULL, *last=NULL;
 	for ( layer=ly_fore; layer<sc->layer_cnt; ++layer ) {
 	    if ( head==NULL )
@@ -3007,6 +3032,7 @@ void SFSplinesFromLayers(SplineFont *sf,int tostroke) {
 	}
     }
     SFReinstanciateRefs(sf);
+    ip->default_joinlimit = tmpjl;
 }
 
 void SFSetLayerWidthsStroked(SplineFont *sf, real strokewidth) {
@@ -3067,38 +3093,23 @@ void EntityDefaultStrokeFill(Entity *ent) {
     }
 }
 
-SplinePointList *SplinesFromEntityChar(EntityChar *ec,int *flags,int is_stroked) {
+SplinePointList *SplinesFromEntityChar(EntityChar *ec, ImportParams *ip,
+                                       int is_stroked) {
     Entity *ent, *next;
-    SplinePointList *head=NULL, *last, *new, *nlast, *temp, *each, *transed;
+    SplinePointList *head=NULL, *last, *nlast, *temp, *each, *transed;
     StrokeInfo si;
     real inversetrans[6];
     /*SplineSet *spl;*/
-    int handle_eraser = false;
     int ask = false;
 
     EntityDefaultStrokeFill(ec->splines);
 
     if ( !is_stroked ) {
 
-	if ( *flags==-1 ) {
-	    for ( ent=ec->splines; ent!=NULL; ent = ent->next ) {
-		if ( ent->type == et_splines &&
-			(ent->u.splines.fill.col==0xffffff ||
-			 /*ent->u.splines.clippath!=NULL ||*/
-			 (ent->u.splines.stroke_width!=0 && ent->u.splines.stroke.col!=0xffffffff))) {
-		    ask = true;
-	    break;
-		}
-	    }
-	    if ( ask )
-		*flags = PsStrokeFlagsDlg();
-	}
-
-	if ( *flags & sf_correctdir )		/* Will happen if flags still unset (-1) */
+	if ( ip->correct_direction )
 	    EntityCharCorrectDir(ec);
 
-	handle_eraser = *flags!=-1 && (*flags & sf_handle_eraser);
-	if ( handle_eraser )
+	if ( ip->erasers )
 	    ec->splines = EntityReverse(ec->splines);
     }
 
@@ -3119,59 +3130,60 @@ SplinePointList *SplinesFromEntityChar(EntityChar *ec,int *flags,int is_stroked)
 		/* How do we implement that? Special case: If filled and stroked 0, then */
 		/*  ignore the stroke. This idiom is used by MetaPost sometimes and means */
 		/*  no stroke */
-		memset(&si,'\0',sizeof(si));
-		si.join = ent->u.splines.join;
-		si.cap = ent->u.splines.cap;
-		si.radius = ent->u.splines.stroke_width/2;
+		InitializeStrokeInfo(&si);
+		si.extrema = false;
+		si.simplify = ip->simplify;
+		SITranslatePSArgs(&si, ent->u.splines.join, ent->u.splines.cap);
+		si.width = ent->u.splines.stroke_width;
+		if ( ent->u.splines.miterlimit==JLIMIT_INHERITED ) {
+		    // This is supposed to get temporarily set to a format-
+		    // specific default by the caller
+		    assert( ip->default_joinlimit!=JLIMIT_INHERITED );
+		    si.joinlimit = ip->default_joinlimit;
+		} else
+		    si.joinlimit = ent->u.splines.miterlimit;
 		if ( ent->u.splines.stroke_width==WIDTH_INHERITED )
-		    si.radius = .5;
+		    si.width = 1.0;
+		// These are OK as lc_butt and lj_miter unchanged by SITra()
 		if ( si.cap == lc_inherited ) si.cap = lc_butt;
-		if ( si.join == lc_inherited ) si.join = lj_miter;
-		new = NULL;
+		if ( si.join == lj_inherited ) si.join = lj_miter;
 		MatInverse(inversetrans,ent->u.splines.transform);
+		si.accuracy_target = ip->accuracy_target*MinTransMag(inversetrans);
 		transed = SplinePointListTransform(SplinePointListCopy(
 			ent->u.splines.splines),inversetrans,tpt_AllPoints);
-		for ( each = transed; each!=NULL; each=each->next ) {
-		    temp = SplineSetStroke(each,&si,false);
-		    if ( new==NULL )
-			new=temp;
-		    else
-			nlast->next = temp;
-		    if ( temp!=NULL )
-			for ( nlast=temp; nlast->next!=NULL; nlast=nlast->next );
-		}
-		new = SplinePointListTransform(new,ent->u.splines.transform,tpt_AllPoints);
+		temp = SplineSetStroke(transed, &si, false);
+		temp = SplinePointListTransform(temp,ent->u.splines.transform,tpt_AllPoints);
 		SplinePointListsFree(transed);
-		if ( handle_eraser && ent->u.splines.stroke.col==0xffffff ) {
-		    head = EraseStroke(ec->sc,head,new);
+		if ( ip->erasers && ent->u.splines.stroke.col==0xffffff ) {
+		    head = EraseStroke(ec->sc,head,temp);
 		    last = head;
 		    if ( last!=NULL )
 			for ( ; last->next!=NULL; last=last->next );
 		} else {
 		    if ( head==NULL )
-			head = new;
+			head = temp;
 		    else
-			last->next = new;
-		    if ( new!=NULL )
-			for ( last = new; last->next!=NULL; last=last->next );
+			last->next = temp;
+		    if ( temp!=NULL )
+			for ( last = temp; last->next!=NULL; last=last->next );
 		}
 	    }
 	    /* If they have neither a stroke nor a fill, pretend they said fill */
 	    if ( ent->u.splines.fill.col==0xffffffff && ent->u.splines.stroke.col!=0xffffffff )
 		SplinePointListsFree(ent->u.splines.splines);
-	    else if ( handle_eraser && ent->u.splines.fill.col==0xffffff ) {
+	    else if ( ip->erasers && ent->u.splines.fill.col==0xffffff ) {
 		head = EraseStroke(ec->sc,head,ent->u.splines.splines);
 		last = head;
 		if ( last!=NULL )
 		    for ( ; last->next!=NULL; last=last->next );
 	    } else {
-		new = ent->u.splines.splines;
+		temp = ent->u.splines.splines;
 		if ( head==NULL )
-		    head = new;
+		    head = temp;
 		else
-		    last->next = new;
-		if ( new!=NULL )
-		    for ( last = new; last->next!=NULL; last=last->next );
+		    last->next = temp;
+		if ( temp!=NULL )
+		    for ( last = temp; last->next!=NULL; last=last->next );
 	    }
 	}
 	SplinePointListsFree(ent->clippath);
@@ -3180,15 +3192,17 @@ SplinePointList *SplinesFromEntityChar(EntityChar *ec,int *flags,int is_stroked)
 return( head );
 }
 
-SplinePointList *SplinesFromEntities(Entity *ent,int *flags,int is_stroked) {
+SplinePointList *SplinesFromEntities(Entity *ent, ImportParams *ip,
+                                     int is_stroked) {
     EntityChar ec;
 
     memset(&ec,'\0',sizeof(ec));
     ec.splines = ent;
-return( SplinesFromEntityChar(&ec,flags,is_stroked));
+    return SplinesFromEntityChar(&ec,ip,is_stroked);
 }
 
-SplinePointList *SplinePointListInterpretPS(FILE *ps,int flags,int is_stroked, int *width) {
+SplinePointList *SplinePointListInterpretPS(FILE *ps, ImportParams *ip,
+                                            int is_stroked, int *width) {
     EntityChar ec;
     SplineChar sc;
 
@@ -3199,7 +3213,7 @@ SplinePointList *SplinePointListInterpretPS(FILE *ps,int flags,int is_stroked, i
     InterpretPS(ps,NULL,&ec,NULL);
     if ( width!=NULL )
 	*width = ec.width;
-return( SplinesFromEntityChar(&ec,&flags,is_stroked));
+    return SplinesFromEntityChar(&ec,ip,is_stroked);
 }
 
 Entity *EntityInterpretPS(FILE *ps,int *width) {
@@ -3228,7 +3242,7 @@ return( NULL );
 return( cur );
 }
 
-static void SCInterpretPS(FILE *ps,SplineChar *sc) {
+static void SCInterpretPS(FILE *ps, SplineChar *sc) {
     EntityChar ec;
     real dval;
     char tokbuf[10];
@@ -3255,7 +3269,12 @@ static void SCInterpretPS(FILE *ps,SplineChar *sc) {
     _InterpretPS(&wrapper,&ec,NULL);
     sc->width = ec.width;
     sc->layer_cnt = 1;
-    SCAppendEntityLayers(sc,ec.splines);
+    ImportParams *ip = ImportParamsState();
+    bigreal tmpjl = ip->default_joinlimit;
+    if ( tmpjl==JLIMIT_INHERITED )
+	ip->default_joinlimit = 10.0; // PostScript default
+    SCAppendEntityLayers(sc,ec.splines,ImportParamsState());
+    ip->default_joinlimit = tmpjl;
     if ( sc->layer_cnt==1 ) ++sc->layer_cnt;
     sc->layers[ly_fore].refs = revrefs(ec.refs);
     free(wrapper.top);
@@ -3657,6 +3676,11 @@ SplineChar *PSCharStringToSplines(uint8 *type1, int len, struct pscontext *conte
 		stack[sp++] = -(v-251)*256 - *type1++ - 108;
 		--len;
 	    } else {
+		if (len < 4) {
+			LogError(_("Not enough data: %d < 4"), len);
+			len = 0;
+			break;
+		}
 		int val = (*type1<<24) | (type1[1]<<16) | (type1[2]<<8) | type1[3];
 		stack[sp++] = val;
 		type1 += 4;

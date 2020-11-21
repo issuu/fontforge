@@ -44,41 +44,43 @@
  * wget http://unicode.org/Public/MAPPINGS/ISO8859/8859-15.TXT
  * wget http://unicode.org/Public/MAPPINGS/ISO8859/8859-16.TXT
  * wget http://unicode.org/Public/MAPPINGS/VENDORS/MISC/KOI8-R.TXT
- * mv KOI8-R.TXT koi8r.TXT
  * wget http://unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/JIS/JIS0201.TXT
- * mv JIS0201.TXT JIS0201.txt
  * wget http://unicode.org/Public/MAPPINGS/VENDORS/ADOBE/zdingbat.txt
- * mv zdingbat.txt zapfding.TXT
  * wget http://unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/JIS/JIS0212.TXT
+ * wget http://unicode.org/Public/MAPPINGS/VENDORS/APPLE/ROMAN.TXT
+ * wget http://unicode.org/Public/MAPPINGS/VENDORS/APPLE/SYMBOL.TXT
+ * wget http://unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT
+ * wget http://unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP950.TXT
  */
 
 #include <fontforge-config.h>
 
+#include "basics.h"
+#include "charset.h"
+
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <charset.h>
-#include <basics.h>
 
 char *alphabets[] = { "8859-1.TXT", "8859-2.TXT", "8859-3.TXT", "8859-4.TXT",
     "8859-5.TXT", "8859-6.TXT", "8859-7.TXT", "8859-8.TXT", "8859-9.TXT",
     "8859-10.TXT", "8859-11.TXT", "8859-13.TXT", "8859-14.TXT", "8859-15.TXT",
-    /*"8859-16.TXT",*/ "koi8r.TXT", "JIS0201.txt", "WIN.TXT", "MacRoman.TXT",
-    "MacSYMBOL.TXT", "zapfding.TXT", /*"MacCYRILLIC.TXT",*/ NULL };
+    "8859-16.TXT", "KOI8-R.TXT", "JIS0201.TXT", "CP1252.TXT", "ROMAN.TXT",
+    "SYMBOL.TXT", "zdingbat.txt", /*"MacCYRILLIC.TXT",*/ NULL };
 char *alnames[] = { "i8859_1", "i8859_2", "i8859_3", "i8859_4",
     "i8859_5", "i8859_6", "i8859_7", "i8859_8", "i8859_9",
     "i8859_10", "i8859_11", "i8859_13", "i8859_14", "i8859_15",
-    /* "i8859_16",*/ "koi8_r", "jis201", "win", "mac",
+    "i8859_16", "koi8_r", "jis201", "win", "mac",
     "MacSymbol", "ZapfDingbats", /*"MacCyrillic",*/ NULL };
 int almaps[] = { em_iso8859_1, em_iso8859_2, em_iso8859_3, em_iso8859_4,
     em_iso8859_5, em_iso8859_6, em_iso8859_7, em_iso8859_8, em_iso8859_9,
     em_iso8859_10, em_iso8859_11, em_iso8859_13, em_iso8859_14, em_iso8859_15,
-    /*em_iso8859_16,*/ em_koi8_r, em_jis201, em_win, em_mac, em_symbol, em_zapfding,
+    em_iso8859_16, em_koi8_r, em_jis201, em_win, em_mac, em_symbol, em_zapfding,
     -1 };
 
 
-char *cjk[] = { "JIS0208.TXT", "JIS0212.TXT", "BIG5.TXT", "GB2312.TXT",
+char *cjk[] = { "JIS0208.TXT", "JIS0212.TXT", "CP950.TXT", "GB2312.TXT",
 	"HANGUL.TXT", "Big5HKSCS.txt", NULL };
 /* I'm only paying attention to Wansung encoding (in HANGUL.TXT) which is 94x94 */
 /* I used to look at OLD5601, but that maps to Unicode 1.0, and Hangul's moved */
@@ -101,12 +103,12 @@ const char CantSaveFile[] = "Can't open or write to output file %s\n";	/* exit(1
 const char NoMoreMemory[] = "Can't access more memory.\n";		/* exit(3) */
 const char LineLengthBg[] = "Error with %s. Found line too long: %s\n";	/* exit(4) */
 
-static add_data_comment_at_EOL(FILE *output, int counter) {
+static int add_data_comment_at_EOL(FILE *output, int counter) {
 /* append an EOL index locator marker to make it easier to search for table values */
     if ( (counter & 63)==0 )
-	fprintf( output, "\t/* 0x%04x */\n",counter);
+	return( fprintf( output, "\t/* 0x%04x */\n",counter) );
     else
-	fprintf( output, "\n");
+	return( fprintf( output, "\n") );
 }
 
 static int dumpalphas(FILE *output, FILE *header) {

@@ -25,12 +25,18 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
 #include "fontforgeui.h"
+#include "fvfonts.h"
+#include "gkeysym.h"
+#include "mathconstants.h"
+#include "splineutil.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
 #include <stddef.h>
-#include <gkeysym.h>
-#include <ustring.h>
-#include <utype.h>
 
 extern struct math_constants_descriptor math_constants_descriptor[];
 
@@ -132,7 +138,7 @@ static struct col_init mathkern[] = {
     COL_INIT_EMPTY
 };
 static struct matrixinit mi_mathkern =
-    { sizeof(mathkern)/sizeof(struct col_init)-1, mathkern, 0, NULL, NULL, NULL, extpart_finishedit, NULL, NULL, NULL };
+    { sizeof(mathkern)/sizeof(struct col_init)-1, mathkern, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
 
 #define CID_Exten	1000
@@ -702,7 +708,7 @@ static int gc_e_h(GWindow gw, GEvent *event) {
 	math->done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("math.html#GlyphConstruction");
+	    help("ui/dialogs/math.html", "#math-glyphconstruction");
 return( true );
 	} else if ( GMenuIsCommand(event,H_("Quit|Ctl+Q") )) {
 	    MenuExit(NULL,NULL,NULL);
@@ -980,7 +986,7 @@ static int math_e_h(GWindow gw, GEvent *event) {
 	math->done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("math.html");
+	    help("ui/dialogs/math.html", NULL);
 return( true );
 	} else if ( GMenuIsCommand(event,H_("Quit|Ctl+Q") )) {
 	    MenuExit(NULL,NULL,NULL);
@@ -1055,22 +1061,22 @@ return;
 	label[page][row].text_is_1byte = true;
 	label[page][row].text_in_resource = true;
 	gcd[page][row][0].gd.label = &label[page][row];
-	gcd[page][row][0].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-	gcd[page][row][0].gd.popup_msg = (unichar_t *) math_constants_descriptor[i].message;
+	gcd[page][row][0].gd.flags = gg_visible | gg_enabled;
+	gcd[page][row][0].gd.popup_msg = math_constants_descriptor[i].message;
 	gcd[page][row][0].creator = GLabelCreate;
 	hvarray[page][row][0] = &gcd[page][row][0];
 
-	gcd[page][row][1].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	gcd[page][row][1].gd.flags = gg_visible | gg_enabled;
 	gcd[page][row][1].gd.pos.width = 50;
 	gcd[page][row][1].gd.cid = 2*i+1;
-	gcd[page][row][1].gd.popup_msg = (unichar_t *) math_constants_descriptor[i].message;
+	gcd[page][row][1].gd.popup_msg = math_constants_descriptor[i].message;
 	gcd[page][row][1].creator = GTextFieldCreate;
 	hvarray[page][row][1] = &gcd[page][row][1];
 
 	if ( math_constants_descriptor[i].devtab_offset>=0 ) {
-	    gcd[page][row][2].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	    gcd[page][row][2].gd.flags = gg_visible | gg_enabled;
 	    gcd[page][row][2].gd.cid = 2*i+2;
-	    gcd[page][row][2].gd.popup_msg = (unichar_t *) math_constants_descriptor[i].message;
+	    gcd[page][row][2].gd.popup_msg = math_constants_descriptor[i].message;
 	    gcd[page][row][2].creator = GTextFieldCreate;
 	    hvarray[page][row][2] = &gcd[page][row][2];
 	} else
@@ -1540,8 +1546,8 @@ static int MKD_Parse(MathKernDlg *mkd) {
 	    }
 	    qsort(bases,cnt,sizeof(BasePoint *),bp_order_height);
 	    if ( cnt>mkv->cnt ) {
-		mkv->mkd = realloc(mkv->mkd,cnt*sizeof(struct mathkernvertex));
-		memset(mkv->mkd+mkv->cnt,0,(cnt-mkv->cnt)*sizeof(struct mathkernvertex));
+		mkv->mkd = realloc(mkv->mkd,cnt*sizeof(struct mathkerndata));
+		memset(mkv->mkd+mkv->cnt,0,(cnt-mkv->cnt)*sizeof(struct mathkerndata));
 	    }
 	    for ( j=0; j<cnt; ++j ) {
 		bases[j]->x = rint(bases[j]->x);

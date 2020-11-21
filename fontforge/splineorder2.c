@@ -24,14 +24,23 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "splineorder2.h"
+
+#include "chardata.h"
 #include "fontforge.h"
-#include <math.h>
-#include <unistd.h>
-#include <time.h>
+#include "splinerefigure.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <locale.h>
-#include <utype.h>
-#include <ustring.h>
-#include <chardata.h>
+#include <math.h>
+#include <time.h>
+#include <unistd.h>
 #ifdef HAVE_IEEEFP_H
 # include <ieeefp.h>		/* Solaris defines isnan in ieeefp rather than math.h */
 #endif
@@ -81,7 +90,7 @@ static int comparespline(Spline *ps, Spline *ttf, real tmin, real tmax, real err
     else if ( ps->to->me.x<bb.minx ) bb.minx = ps->to->me.x;
     if ( ps->to->me.y>bb.maxy ) bb.maxy = ps->to->me.y;
     else if ( ps->to->me.y<bb.miny ) bb.miny = ps->to->me.y;
-    for ( t=.1; t<1; t+= .1 ) {
+    for ( t=.1; t<0.99; t+= .1 ) {
 	d = (ttf->splines[0].b*t+ttf->splines[0].c)*t+ttf->splines[0].d;
 	o = (ttf->splines[1].b*t+ttf->splines[1].c)*t+ttf->splines[1].d;
 	if ( d<bb.minx || d>bb.maxx || o<bb.miny || o>bb.maxy )
@@ -238,8 +247,10 @@ static SplinePoint *LinearSpline(Spline *ps,SplinePoint *start, real tmax) {
     }
     end->ttfindex = 0xfffe;
     end->nextcpindex = 0xfffe;
-    end->me.x = end->nextcp.x = end->prevcp.x = x;
-    end->me.y = end->nextcp.y = end->prevcp.y = y;
+    start->nextcp.x = start->me.x;
+    start->nextcp.y = start->me.y;
+    end->me.x = end->prevcp.x = x;
+    end->me.y = end->prevcp.y = y;
     end->nonextcp = end->noprevcp = start->nonextcp = true;
     new->from = start;		start->next = new;
     new->to = end;		end->prev = new;
@@ -1299,6 +1310,13 @@ void SplineRefigure2(Spline *spline) {
 	spline->islinear = false;
 	if ( ysp->b==0 && xsp->b==0 )
 	    spline->islinear = true;	/* This seems extremely unlikely... */
+	if ( from->nextcpselected || to->prevcpselected ) {
+            // The convention for tracking selection of quadratic control
+	    // points is to use nextcpselected except at the tail of the
+	    // list, where it's prevcpselected on the first point.
+	    from->nextcpselected = true;
+	    to->prevcpselected = false;
+	}
     }
     if ( isnan(ysp->b) || isnan(xsp->b) )
 	IError("NaN value in spline creation");
@@ -1425,8 +1443,10 @@ return;
     unit.x = from->nextcp.x-from->me.x;
     unit.y = from->nextcp.y-from->me.y;
     len = sqrt(unit.x*unit.x + unit.y*unit.y);
-    if ( len!=0 )
-	unit.x /= len; unit.y /= len;
+    if ( len!=0 ) {
+        unit.x /= len;
+        unit.y /= len;
+    }
 
     if ( (fpt = from->pointtype)==pt_hvcurve ) fpt = pt_curve;
     if ( (tpt =   to->pointtype)==pt_hvcurve ) tpt = pt_curve;

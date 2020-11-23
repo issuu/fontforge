@@ -24,13 +24,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GWIDGET_H
-#define _GWIDGET_H
+
+#ifndef FONTFORGE_GWIDGET_H
+#define FONTFORGE_GWIDGET_H
+
+#include "gdraw.h"
+#include "ggadget.h"
+#include "gprogress.h"
 
 #include <stdarg.h>
-#include "gdraw.h"
-#include "gprogress.h"
-#include "ggadget.h"
 
 struct ggadget;
 struct ggadgetcreatedata;
@@ -73,10 +75,6 @@ void GWidgetNextFocus(GWindow);
 void GWidgetPrevFocus(GWindow);
 void GWidgetRequestVisiblePalette(GWindow palette,int visible);
 void GWidgetHidePalettes(void);
-void GPaletteDock(GWindow palette,int x, int y);
-void GPaletteUndock(GWindow palette,int x, int y);
-int GPaletteIsDocked(GWindow palette);
-void GWidgetReparentWindow(GWindow child,GWindow newparent, int x,int y);
 
 struct ggadget *GWidgetGetControl(GWindow gw, int cid);
 struct ggadget *_GWidgetGetGadgets(GWindow gw);
@@ -130,7 +128,7 @@ int GWidgetChoices8(const char *title, const char **choices,int cnt, int def,
 	const char *question,...);
 int GWidgetChoicesB8(char *title, const char **choices, int cnt, int def,
 	char *buts[2], const char *question,...);
-int GWidgetChoicesBM8(char *title, const char **choices,char *sel,
+int GWidgetChoicesBM8(const char *title, const char **choices, char *sel,
 	int cnt, char *buts[2], const char *question,...);
 
 extern struct hslrgb GWidgetColor(const char *title,struct hslrgb *defcol,struct hslrgb fontcols[6]);
@@ -159,4 +157,4 @@ extern GIC *GWidgetCreateInputContext(GWindow w,enum gic_style def_style);
 extern GIC *GWidgetGetInputContext(GWindow w);
 
 
-#endif
+#endif /* FONTFORGE_GWIDGET_H */

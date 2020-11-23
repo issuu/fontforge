@@ -24,25 +24,37 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <math.h>
-#include <ustring.h>
-#include <utype.h>
-#include "sd.h"
-#include "gfile.h"
 
+#include <fontforge-config.h>
+
+#include "autotrace.h"
+
+#include "cvundoes.h"
+#include "ffglib.h"
+#include "fontforgevw.h"
+#include "fvimportbdf.h"
+#include "gfile.h"
+#include "psread.h"
+#include "sd.h"
+#include "splineorder2.h"
+#include "splinestroke.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <dirent.h>		/* for opendir,etc. */
+#include <errno.h>		/* for errors */
+#include <fcntl.h>		/* for open */
+#include <math.h>
+#include <stdlib.h>		/* for getenv */
+#include <sys/stat.h>		/* for open */
 #include <sys/types.h>		/* for waitpid */
+#include <unistd.h>		/* for access, unlink, fork, execvp, getcwd */
+
 #if !defined(__MINGW32__)
 #include <sys/wait.h>		/* for waitpid */
 #endif
-#include <unistd.h>		/* for access, unlink, fork, execvp, getcwd */
-#include <sys/stat.h>		/* for open */
-#include <fcntl.h>		/* for open */
-#include <stdlib.h>		/* for getenv */
-#include <errno.h>		/* for errors */
-#include <dirent.h>		/* for opendir,etc. */
-
-#include "ffglib.h"
 
 int preferpotrace = false;
 
@@ -86,10 +98,11 @@ static SplinePointList *localSplinesFromEntities(Entity *ent, Color bgcol, int i
 	enext = ent->next;
 	if ( ent->type == et_splines ) {
 	    if ( /* ent->u.splines.fill.col==0xffffffff && */ ent->u.splines.stroke.col!=0xffffffff ) {
-		memset(&si,'\0',sizeof(si));
+		InitializeStrokeInfo(&si);
 		si.join = ent->u.splines.join;
 		si.cap = ent->u.splines.cap;
-		si.radius = ent->u.splines.stroke_width/2;
+		si.width = ent->u.splines.stroke_width;
+		si.joinlimit = ent->u.splines.miterlimit;
 		new = NULL;
 		for ( test = ent->u.splines.splines; test!=NULL; test=test->next ) {
 		    temp = SplineSetStroke(test,&si,false);
@@ -216,7 +229,7 @@ static char *mytempdir(void) {
     eon = buffer+strlen(buffer);
     while ( 1 ) {
 	sprintf( eon, "%04X_mf%d", getpid(), ++cnt );
-	if ( mkdir(buffer,0770)==0 )
+	if ( GFileMkDir(buffer,0770)==0 )
 return( copy(buffer) );
 	else if ( errno!=EEXIST )
 return( NULL );
@@ -400,7 +413,7 @@ return;
 	/* We can't use AutoTrace's own "background-color" ignorer because */
 	/*  it ignores counters as well as surrounds. So "O" would be a dark */
 	/*  oval, etc. */
-	ps = tmpfile();
+	ps = GFileTmpfile();
 	if ( (pid=fork())==0 ) {
 	    /* Child */
 	    close(1);
@@ -826,6 +839,7 @@ return( NULL );
 	ff_post_error(_("Can't run mf"),_("Can't run mf"));
     free(arglist[1]);
     cleantempdir(tempdir);
+    free(tempdir);
 return( sf );
 #endif
 }

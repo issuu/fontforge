@@ -25,26 +25,44 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autowidth.h"
+#include "bitmapchar.h"
+#include "chardata.h"
+#include "dumppfa.h"
+#include "encoding.h"
+#include "featurefile.h"
 #include "fontforgeui.h"
-#include "ofl.h"
-#include <ustring.h>
-#include <chardata.h>
-#include <utype.h>
-#include "unicoderange.h"
-#include <locale.h>
+#include "gkeysym.h"
+#include "gutils.h"
 #include "lookups.h"
+#include "namelist.h"
+#include "ofl.h"
+#include "parsepfa.h"
+#include "parsettf.h"
+#include "psread.h"
+#include "sfd.h"
 #include "sfundo.h"
-#include "collabclientui.h"
+#include "splineorder2.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottf.h"
+#include "unicoderange.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <locale.h>
+#include <math.h>
+#include <time.h>
+#include <unistd.h>
 
 extern int _GScrollBar_Width;
 extern GBox _ggadget_Default_Box;
 #define ACTIVE_BORDER   (_ggadget_Default_Box.active_border)
 #define MAIN_FOREGROUND (_ggadget_Default_Box.main_foreground)
-
-#include <gkeysym.h>
-#include <math.h>
-#include <unistd.h>
-#include <time.h>
 
 static int last_aspect=0;
 
@@ -222,14 +240,14 @@ static GTextInfo gaspversions[] = {
 static GTextInfo panfamily[] = {
     { (unichar_t *) N_("PanoseFamily|Any"), NULL, 0, 0, (void *) 0, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("PanoseFamily|No Fit"), NULL, 0, 0, (void *) 1, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Latin: Text & Display"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Latin: Text and Display"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
 /* GT: See the long comment at "Property|New" */
 /* GT: The msgstr should contain a translation of "Script", ignore "cursive|" */
 /* GT: English uses "script" to me a general writing style (latin, greek, kanji) */
 /* GT: and the cursive handwriting style. Here we mean cursive handwriting. */
     { (unichar_t *) N_("cursive|Latin: Handwritten"), NULL, 0, 0, (void *) 3, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Latin: Decorative"), NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Latin: Pictorial/Symbol"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Latin: Pictorial and Symbol"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "6", NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "7", NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "8", NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -292,7 +310,7 @@ static GTextInfo panweight[] = {
     { (unichar_t *) N_("Bold"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Heavy"), NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Black"), NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Nord"), NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Extra Black (Nord)"), NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "12", NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "13", NULL, 0, 0, (void *) 13, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "14", NULL, 0, 0, (void *) 14, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -442,7 +460,7 @@ static GTextInfo pantool[] = {
     { (unichar_t *) N_("Ball (Round Cap)"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Brush"), NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Rough"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Felt Pen/Brush Tip"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Felt Pen or Brush Tip"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Wild Brush - Drips a lot"), NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "10", NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "11", NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -550,18 +568,18 @@ static GTextInfo panform[] = {
 static GTextInfo panfinials[] = {
     { (unichar_t *) N_("PanoseFinials|Any"), NULL, 0, 0, (void *) 0, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("PanoseFinials|No Fit"), NULL, 0, 0, (void *) 1, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("None/No loops"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("None/Closed loops"), NULL, 0, 0, (void *) 3, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("None/Open loops"), NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Sharp/No loops"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Sharp/Closed loops"), NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Sharp/Open loops"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Tapered/No loops"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Tapered/Closed loops"), NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Tapered/Open loops"), NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Round/No loops"), NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Round/Closed loops"), NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Round/Open loops"), NULL, 0, 0, (void *) 13, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("None/No Loops"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("None/Closed Loops"), NULL, 0, 0, (void *) 3, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("None/Open Loops"), NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Sharp/No Loops"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Sharp/Closed Loops"), NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Sharp/Open Loops"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Tapered/No Loops"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Tapered/Closed Loops"), NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Tapered/Open Loops"), NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Round/No Loops"), NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Round/Closed Loops"), NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Round/Open Loops"), NULL, 0, 0, (void *) 13, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "14", NULL, 0, 0, (void *) 14, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "15", NULL, 0, 0, (void *) 15, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     GTEXTINFO_EMPTY
@@ -615,7 +633,7 @@ static GTextInfo panaspect[] = {
     { (unichar_t *) N_("Extended"), NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Very Extended"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Super Extended"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) "9", NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Monospaced"), NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "10", NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "11", NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "12", NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -667,12 +685,12 @@ static GTextInfo panserifvar[] = {
 static GTextInfo pantreatment[] = {
     { (unichar_t *) N_("PanoseTreatment|Any"), NULL, 0, 0, (void *) 0, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("PanoseTreatment|No Fit"), NULL, 0, 0, (void *) 1, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Solid Fill"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Standard Solid Fill"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("No Fill"), NULL, 0, 0, (void *) 3, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Patterned Fill"), NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Complex Fill"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Shaped Fill"), NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Drawn/Distressed"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Drawn or Distressed"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "8", NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "9", NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "10", NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -708,7 +726,7 @@ static GTextInfo pantopology2[] = {
     { (unichar_t *) N_("Standard"), NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Square"), NULL, 0, 0, (void *) 3, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Multiple Segment"), NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Deco (E,M,S) Waco midline"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Deco (E,M,S) Waco Midline"), NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Uneven Weighting"), NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Diverse Arms"), NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Diverse Forms"), NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -754,7 +772,7 @@ static GTextInfo pankind[] = {
     { (unichar_t *) N_("Borders"), NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Icons"), NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Logos"), NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Industry specific"), NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Industry Specific"), NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "13", NULL, 0, 0, (void *) 13, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "14", NULL, 0, 0, (void *) 14, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) "15", NULL, 0, 0, (void *) 15, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1081,17 +1099,19 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Latin-1 Supplement"),			NULL, 0, 0, (void *) 1, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Latin Extended-A"),			NULL, 0, 0, (void *) 2, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Latin Extended-B"),			NULL, 0, 0, (void *) 3, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("IPA Extensions"),			NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Spacing Modifier Letters"),		NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Combining Diacritical Marks"),		NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("IPA Ext & Phonetic Ext (& Supplement)"),NULL, 0, 0, (void *) 4, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Modifier Letters & Modifier Tone Letters"),
+								NULL, 0, 0, (void *) 5, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Combining Diacritical Marks (& Supplement)"),
+								NULL, 0, 0, (void *) 6, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Greek and Coptic"),			NULL, 0, 0, (void *) 7, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Coptic"),				NULL, 0, 0, (void *) 8, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Cyrillic & Supplement"),		NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Cyrillic (& Supplement & Ext A/B)"),	NULL, 0, 0, (void *) 9, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Armenian"),				NULL, 0, 0, (void *) 10, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Hebrew"),				NULL, 0, 0, (void *) 11, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Vai"),					NULL, 0, 0, (void *) 12, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Arabic"),				NULL, 0, 0, (void *) 13, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("N'Ko"),					NULL, 0, 0, (void *) 14, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Arabic (& Supplement)"),		NULL, 0, 0, (void *) 13, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("NKo"),					NULL, 0, 0, (void *) 14, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Devanagari"),				NULL, 0, 0, (void *) 15, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Bengali"),				NULL, 0, 0, (void *) 16, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Gurmukhi"),				NULL, 0, 0, (void *) 17, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1103,19 +1123,20 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Malayalam"),				NULL, 0, 0, (void *) 23, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Thai"),					NULL, 0, 0, (void *) 24, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Lao"),					NULL, 0, 0, (void *) 25, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Georgian"),				NULL, 0, 0, (void *) 26, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Georgian (& Supplement)"),		NULL, 0, 0, (void *) 26, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Balinese"),				NULL, 0, 0, (void *) 27, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Hangul Jamo"),				NULL, 0, 0, (void *) 28, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Latin Extended Additional"),		NULL, 0, 0, (void *) 29, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Latin Extended Additional/C/D"),	NULL, 0, 0, (void *) 29, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Greek Extended"),			NULL, 0, 0, (void *) 30, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("General Punctuation"),			NULL, 0, 0, (void *) 31, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("General/Supplemental Punctuation"),	NULL, 0, 0, (void *) 31, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Subscripts and Superscripts"),		NULL, 0, 0, (void *) 32, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Currency Symbols"),			NULL, 0, 0, (void *) 33, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Combining Diacritical Marks for Symbols"), NULL, 0, 0, (void *) 34, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Letterlike Symbols"),			NULL, 0, 0, (void *) 35, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Numeric Forms"),			NULL, 0, 0, (void *) 36, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Arrows (& Supplements A&B)"),		NULL, 0, 0, (void *) 37, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Mathematical Operators (Suppl. & Misc.)"), NULL, 0, 0, (void *) 38, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Arrows & Sup Arrows A/B & Misc Arrows"),NULL, 0, 0, (void *) 37, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Math Operators & Sup Math Operators & Misc Math Symbols A/B"),
+								NULL, 0, 0, (void *) 38, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Miscellaneous Technical"),		NULL, 0, 0, (void *) 39, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Control Pictures"),			NULL, 0, 0, (void *) 40, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Optical Character Recognition"),	NULL, 0, 0, (void *) 41, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1127,8 +1148,8 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Dingbats"),				NULL, 0, 0, (void *) 47, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("CJK Symbols and Punctuation"),		NULL, 0, 0, (void *) 48, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Hiragana"),				NULL, 0, 0, (void *) 49, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Katakana & Phonetic Extensions"),	NULL, 0, 0, (void *) 50, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Bopomofo & Extended"),			NULL, 0, 0, (void *) 51, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Katakana (& Phonetic Extensions)"),	NULL, 0, 0, (void *) 50, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Bopomofo (& Extended)"),		NULL, 0, 0, (void *) 51, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Hangul Compatibility Jamo"),		NULL, 0, 0, (void *) 52, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Phags-pa"),				NULL, 0, 0, (void *) 53, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Enclosed CJK Letters and Months"),	NULL, 0, 0, (void *) 54, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1136,14 +1157,16 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Hangul Syllables"),			NULL, 0, 0, (void *) 56, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Non-Basic Multilingual Plane"),		NULL, 0, 0, (void *) 57, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Phoenician"),				NULL, 0, 0, (void *) 58, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("CJK Unified Ideographs"),		NULL, 0, 0, (void *) 59, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-		/* And too much other stuff to put in this string */
+    { (unichar_t *) N_("CJK (& Ext A/B) & CJK Radicals Sup & Kangxi & IDC & Kanbun"),
+								NULL, 0, 0, (void *) 59, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Private Use Area"),			NULL, 0, 0, (void *) 60, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("CJK Compatibility Ideographs"),		NULL, 0, 0, (void *) 61, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("CJK Strokes & CJK Compat Ideographs (& Sup)"),
+								NULL, 0, 0, (void *) 61, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Alphabetic Presentation Forms"),	NULL, 0, 0, (void *) 62, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Arabic Presentation Forms-A"),		NULL, 0, 0, (void *) 63, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Combining Half Marks"),			NULL, 0, 0, (void *) 64, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("CJK Compatibility Forms"),		NULL, 0, 0, (void *) 65, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Vertical Forms & CJK Compatibility Forms"),
+								NULL, 0, 0, (void *) 65, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Small Form Variants"),			NULL, 0, 0, (void *) 66, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Arabic Presentation Forms-B"),		NULL, 0, 0, (void *) 67, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Halfwidth and Fullwidth Forms"),	NULL, 0, 0, (void *) 68, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1153,23 +1176,24 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Thaana"),				NULL, 0, 0, (void *) 72, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Sinhala"),				NULL, 0, 0, (void *) 73, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Myanmar"),				NULL, 0, 0, (void *) 74, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Ethiopic"),				NULL, 0, 0, (void *) 75, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Ethiopic (& Supplement/Extended)"), 	NULL, 0, 0, (void *) 75, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Cherokee"),				NULL, 0, 0, (void *) 76, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Unified Canadian Aboriginal Syllabics"),NULL, 0, 0, (void *) 77, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Ogham"),				NULL, 0, 0, (void *) 78, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Runic"),				NULL, 0, 0, (void *) 79, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Khmer"),				NULL, 0, 0, (void *) 80, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Khmer & Khmer Symbols"),		NULL, 0, 0, (void *) 80, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Mongolian"),				NULL, 0, 0, (void *) 81, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Braille Patterns"),			NULL, 0, 0, (void *) 82, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Yi Syllables/Radicals"),		NULL, 0, 0, (void *) 83, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Tagalog/Hanunno/Buhid/Tagbanwa"),	NULL, 0, 0, (void *) 84, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Tagalog/Hanunoo/Buhid/Tagbanwa"),	NULL, 0, 0, (void *) 84, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Old Italic"),				NULL, 0, 0, (void *) 85, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Gothic"),				NULL, 0, 0, (void *) 86, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Deseret"),				NULL, 0, 0, (void *) 87, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Musical Symbols, Byzantine & Western"), NULL, 0, 0, (void *) 88, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Byzantine Music & Music & Ancient Greek Music"),
+								NULL, 0, 0, (void *) 88, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Mathematical Alphanumeric Symbols"),	NULL, 0, 0, (void *) 89, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Private Use (planes 15&16)"),		NULL, 0, 0, (void *) 90, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Variation Selectors"),			NULL, 0, 0, (void *) 91, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Supplementary Private Use Area A/B"),	NULL, 0, 0, (void *) 90, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Variation Selectors (& Supplement)"), 	NULL, 0, 0, (void *) 91, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Tags"),					NULL, 0, 0, (void *) 92, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Limbu"),				NULL, 0, 0, (void *) 93, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Tai Le"),				NULL, 0, 0, (void *) 94, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1179,7 +1203,8 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Tifinagh"),				NULL, 0, 0, (void *) 98, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Yijing Hexagram Symbols"),		NULL, 0, 0, (void *) 99, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Syloti Nagri"),				NULL, 0, 0, (void *) 100, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Linear B Syllabary/Ideograms, Agean Num."),	NULL, 0, 0, (void *) 101, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Linear B Syllabary/Ideograms & Aegean Numbers"),
+								NULL, 0, 0, (void *) 101, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Ancient Greek Numbers"),		NULL, 0, 0, (void *) 102, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Ugaritic"),				NULL, 0, 0, (void *) 103, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Old Persian"),				NULL, 0, 0, (void *) 104, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1188,9 +1213,9 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Cypriot Syllabary"),			NULL, 0, 0, (void *) 107, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Kharoshthi"),				NULL, 0, 0, (void *) 108, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Tai Xuan Jing Symbols"),		NULL, 0, 0, (void *) 109, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Cuneiform Numbers & Punctuation"),	NULL, 0, 0, (void *) 110, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Cuneiform (& Numbers and Punctuation)"),NULL, 0, 0, (void *) 110, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Counting Rod Numerals"),		NULL, 0, 0, (void *) 111, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Sudanese"),				NULL, 0, 0, (void *) 112, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Sundanese"),				NULL, 0, 0, (void *) 112, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Lepcha"),				NULL, 0, 0, (void *) 113, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Ol Chiki"),				NULL, 0, 0, (void *) 114, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Saurashtra"),				NULL, 0, 0, (void *) 115, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -1199,8 +1224,8 @@ static GTextInfo unicoderangenames[] = {
     { (unichar_t *) N_("Cham"),					NULL, 0, 0, (void *) 118, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Ancient Symbols"),			NULL, 0, 0, (void *) 119, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Phaistos Disc"),			NULL, 0, 0, (void *) 120, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Carian/Lycian/Lydian"),			NULL, 0, 0, (void *) 121, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
-    { (unichar_t *) N_("Mahjong & Domino Tiles"),		NULL, 0, 0, (void *) 122, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Lycian/Carian/Lydian"),			NULL, 0, 0, (void *) 121, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
+    { (unichar_t *) N_("Mahjong/Domino Tiles"),			NULL, 0, 0, (void *) 122, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Unassigned Bit 123"),			NULL, 0, 0, (void *) 123, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Unassigned Bit 124"),			NULL, 0, 0, (void *) 124, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
     { (unichar_t *) N_("Unassigned Bit 125"),			NULL, 0, 0, (void *) 125, NULL, 0, 0, 0, 0, 0, 0, 1, 0, 0, '\0'},
@@ -2841,7 +2866,7 @@ return;
 
 static int GFI_Char(struct gfi_data *d,GEvent *event) {
     if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	help("fontinfo.html");
+	help("ui/dialogs/fontinfo.html", NULL);
 return( true );
     } else if ( GMenuIsCommand(event,H_("Save All|Alt+Ctl+S") )) {
 	MenuSaveAll(NULL,NULL,NULL);
@@ -3224,13 +3249,17 @@ return( true );
 }
 
 static int GFI_HelpOFL(GGadget *g, GEvent *e) {
+/* F1 Help to open a browser to sil.org Open Source License and FAQ */
     if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
-	help("http://scripts.sil.org/OFL");
+	help("http://scripts.sil.org/OFL", NULL);
     }
 return( true );
 }
 
 static int GFI_AddOFL(GGadget *g, GEvent *e) {
+/* Add sil.org Open Source License (see ofl.c), and modify with current date */
+/* Author, and Font Family Name for rows[0,1] of the license. You can access */
+/* this routine from GUI at Element->Font_Info->TTF_Names. info at PS_Names. */
     if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
 	struct gfi_data *d = GDrawGetUserData(GGadgetGetWindow(g));
 	GGadget *tng = GWidgetGetControl(GGadgetGetWindow(g),CID_TNames);
@@ -3244,7 +3273,7 @@ static int GFI_AddOFL(GGadget *g, GEvent *e) {
 	time_t now;
 	struct tm *tm;
 
-	time(&now);
+	now = GetTime();
 	tm = localtime(&now);
 
 	tns = GMatrixEditGet(tng, &rows); newtns = NULL;
@@ -3999,7 +4028,7 @@ static int GFI_OK(GGadget *g, GEvent *e) {
 	struct gfi_data *d = GDrawGetUserData(gw);
 	SplineFont *sf = d->sf, *_sf;
 
-	printf("at top of GFI_OK\n");
+//	printf("at top of GFI_OK\n");
 
 	char* sfdfrag  = DumpSplineFontMetadata( sf );
 	SFUndoes* undo = SFUndoCreateSFD( sfut_fontinfo,
@@ -4095,7 +4124,6 @@ return( true );
 	}
 	if ( layer_cnt>=BACK_LAYER_MAX-2 ) {
 	    ff_post_error(_("Too many layers"),_("FontForge supports at most %d layers"),BACK_LAYER_MAX-2);
-	    /* This can be increased in configure-fontforge.h */
 return( true );
 	}
 	if ( !CheckNames(d))
@@ -4141,7 +4169,7 @@ return( true );
 	} else if ( styleid!=0 && fontstyle_name==NULL ) {
 	    ff_post_error(_("Bad Design Size Info"),_("If you specify a style id for the design size, then you must specify a style name"));
 return( true );
-	} else if ( fontstyle_name==NULL && styleid!=0 ) {
+	} else if ( fontstyle_name!=NULL && styleid==0 ) {
 	    ff_post_error(_("Bad Design Size Info"),_("If you specify a style name for the design size, then you must specify a style id"));
 return( true );
 	} else if ( design_size<0 ) {
@@ -4574,9 +4602,6 @@ return(true);
 	SFReplaceFontnameBDFProps(sf);
 	MVReFeatureAll(sf);
 	MVReKernAll(sf);
-
-	collabclient_sendFontLevelRedo( sf );
-
     }
 return( true );
 }
@@ -4690,7 +4715,7 @@ return( true );
 
 static int GFI_ShowPanoseDocs(GGadget *g, GEvent *e) {
     if ( e->type==et_controlevent && e->u.control.subtype == et_buttonactivate ) {
-	help("http://panose.com/");
+	help("http://panose.com/", NULL);
     }
 return( true );
 }
@@ -5070,8 +5095,8 @@ return( true );
 	    txlabel[k].text_is_1byte = true;
 	    txgcd[k].gd.label = &txlabel[k];
 	    txgcd[k].gd.pos.x = 10; txgcd[k].gd.pos.y = y+4;
-	    txgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-	    txgcd[k].gd.popup_msg = (unichar_t *) popups[i];
+	    txgcd[k].gd.flags = gg_visible | gg_enabled;
+	    txgcd[k].gd.popup_msg = popups[i];
 	    txgcd[k++].creator = GLabelCreate;
 	    txarray[j][0] = &txgcd[k-1];
 
@@ -6328,7 +6353,7 @@ static int import_e_h(GWindow gw, GEvent *event) {
 	*done = true;
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("fontinfo.html#Lookups");
+	    help("ui/dialogs/fontinfo.html", "#fontinfo-lookups");
 return( true );
 	}
 return( false );
@@ -6421,7 +6446,7 @@ static int GFI_LookupImportLookup(GGadget *g, GEvent *e) {
 	varray[0] = &gcd[i++]; varray[1] = NULL;
 
 	gcd[i].gd.pos.height = 12*12+6;
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_list_multiplesel|gg_utf8_popup;
+	gcd[i].gd.flags = gg_enabled|gg_visible|gg_list_multiplesel;
 	gcd[i].gd.u.list = ti;
 	gcd[i].creator = GListCreate;
 	varray[2] = &gcd[i++]; varray[3] = NULL;
@@ -7661,27 +7686,27 @@ return;
     nlabel[10].text_is_1byte = true;
     nlabel[10].text_in_resource = true;
     ngcd[10].gd.label = &nlabel[10];
-    ngcd[10].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    ngcd[10].gd.popup_msg = (unichar_t *) _("If you leave this field blank FontForge will use a default based on\neither the version string above, or one in the 'name' table." );
+    ngcd[10].gd.flags = gg_visible | gg_enabled;
+    ngcd[10].gd.popup_msg = _("If you leave this field blank FontForge will use a default based on\neither the version string above, or one in the 'name' table." );
     ngcd[10].creator = GLabelCreate;
 
     sfntrbuf[0]='\0';
     if ( sf->sfntRevision!=sfntRevisionUnset )
 	sprintf( sfntrbuf, "%g", sf->sfntRevision/65536.0 );
-    ngcd[11].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    ngcd[11].gd.flags = gg_visible | gg_enabled;
     nlabel[11].text = (unichar_t *) sfntrbuf;
     nlabel[11].text_is_1byte = true;
     ngcd[11].gd.label = &nlabel[11];
     ngcd[11].gd.cid = CID_Revision;
-    ngcd[11].gd.popup_msg = (unichar_t *) _("If you leave this field blank FontForge will use a default based on\neither the version string above, or one in the 'name' table." );
+    ngcd[11].gd.popup_msg = _("If you leave this field blank FontForge will use a default based on\neither the version string above, or one in the 'name' table." );
     ngcd[11].creator = GTextFieldCreate;
 
     nlabel[12].text = (unichar_t *) _("_Base Filename:");
     nlabel[12].text_is_1byte = true;
     nlabel[12].text_in_resource = true;
     ngcd[12].gd.label = &nlabel[12];
-    ngcd[12].gd.popup_msg = (unichar_t *) _("Use this as the default base for the filename\nwhen generating a font." );
-    ngcd[12].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    ngcd[12].gd.popup_msg = _("Use this as the default base for the filename\nwhen generating a font." );
+    ngcd[12].gd.flags = gg_visible | gg_enabled;
     ngcd[12].creator = GLabelCreate;
 
 /* GT: The space in front of "Same" makes things line up better */
@@ -7717,7 +7742,7 @@ return;
     ngcd[16].creator = GLabelCreate;
 
     ngcd[17].gd.pos.width = ngcd[5].gd.pos.x+ngcd[5].gd.pos.width-26;
-    ngcd[17].gd.flags = gg_visible | gg_enabled | gg_textarea_wrap | gg_utf8_popup;
+    ngcd[17].gd.flags = gg_visible | gg_enabled | gg_textarea_wrap;
     copied_copyright = NULL;
     if ( sf->copyright!=NULL ) {
 	if ( !AllAscii(sf->copyright))
@@ -7728,7 +7753,7 @@ return;
 	ngcd[17].gd.label = &nlabel[17];
     }
     ngcd[17].gd.cid = CID_Notice;
-    ngcd[17].gd.popup_msg = (unichar_t *) _("This must be ASCII, so you may not use the copyright symbol (use (c) instead).");
+    ngcd[17].gd.popup_msg = _("This must be ASCII, so you may not use the copyright symbol (use (c) instead).");
     ngcd[17].creator = GTextAreaCreate;
 
     memset(&nb,0,sizeof(nb)); memset(&nb2,0,sizeof(nb2)); memset(&nb3,0,sizeof(nb3));
@@ -8127,13 +8152,13 @@ return;
     llabel[k].text_is_1byte = true;
     llabel[k].text_in_resource = true;
     lgcd[k].gd.label = &llabel[k];
-    lgcd[k].gd.flags = ltype!=0 ? (gg_visible | gg_utf8_popup | gg_rad_continueold) :
-	sf->multilayer ? (gg_visible | gg_enabled | gg_utf8_popup | gg_cb_on | gg_rad_continueold) :
-	(gg_visible | gg_enabled | gg_utf8_popup | gg_rad_continueold);
+    lgcd[k].gd.flags = ltype!=0 ? (gg_visible| gg_rad_continueold) :
+	sf->multilayer ? (gg_visible | gg_enabled| gg_cb_on | gg_rad_continueold) :
+	(gg_visible | gg_enabled| gg_rad_continueold);
     lgcd[k].gd.cid = CID_IsMultiLayer;
     lgcd[k].gd.handle_controlevent = GFI_Type3Change;
     lgcd[k].creator = GRadioCreate;
-    lgcd[k++].gd.popup_msg = (unichar_t *) _("Allow editing of multiple colors and shades, fills and strokes.\nMulti layered fonts can only be output as type3 or svg fonts.");
+    lgcd[k++].gd.popup_msg = _("Allow editing of multiple colors and shades, fills and strokes.\nMulti layered fonts can only be output as type3 or svg fonts.");
     larray2[j++] = GCD_HPad10; larray2[j++] = &lgcd[k-1]; larray2[j++] = GCD_ColSpan; larray2[j++] = GCD_Glue; larray2[j++] = NULL;
 
     lgcd[k].gd.pos.x = 12; lgcd[k].gd.pos.y = lgcd[k-1].gd.pos.y+14;
@@ -8141,11 +8166,11 @@ return;
     llabel[k].text_is_1byte = true;
     llabel[k].text_in_resource = true;
     lgcd[k].gd.label = &llabel[k];
-    lgcd[k].gd.flags = sf->strokedfont ? (gg_visible | gg_enabled | gg_utf8_popup | gg_cb_on) : (gg_visible | gg_enabled | gg_utf8_popup);
+    lgcd[k].gd.flags = sf->strokedfont ? (gg_visible | gg_enabled| gg_cb_on) : (gg_visible | gg_enabled);
     lgcd[k].gd.cid = CID_IsStrokedFont;
     lgcd[k].gd.handle_controlevent = GFI_Type3Change;
     lgcd[k].creator = GRadioCreate;
-    lgcd[k++].gd.popup_msg = (unichar_t *) _("Glyphs will be composed of stroked lines rather than filled outlines.\nAll glyphs are stroked at the following width");
+    lgcd[k++].gd.popup_msg = _("Glyphs will be composed of stroked lines rather than filled outlines.\nAll glyphs are stroked at the following width");
     larray2[j++] = GCD_HPad10; larray2[j++] = &lgcd[k-1];
 
     lgcd[k].gd.pos.x = 12; lgcd[k].gd.pos.y = lgcd[k-1].gd.pos.y+20;
@@ -8177,12 +8202,12 @@ return;
     llabel[k].text_in_resource = true;
     lgcd[k].gd.label = &llabel[k];
     lgcd[k].gd.flags = ltype==0 || sf->multilayer ?
-	(gg_visible | gg_enabled | gg_cb_on | gg_utf8_popup) :
-	(gg_visible | gg_enabled | gg_utf8_popup);
+	(gg_visible | gg_enabled | gg_cb_on) :
+	(gg_visible | gg_enabled);
     lgcd[k].gd.cid = CID_IsOrder3;
     lgcd[k].gd.handle_controlevent = GFI_OrderChange;
     lgcd[k].creator = GRadioCreate;
-    lgcd[k++].gd.popup_msg = (unichar_t *) _(
+    lgcd[k++].gd.popup_msg = _(
 	"Use cubic (that is postscript) splines to hold the outlines of all\n"
 	"layers of this font. Cubic splines are generally easier to edit\n"
 	"than quadratic (and you may still generate a truetype font from them).");
@@ -8191,13 +8216,13 @@ return;
     llabel[k].text_is_1byte = true;
     llabel[k].text_in_resource = true;
     lgcd[k].gd.label = &llabel[k];
-    lgcd[k].gd.flags = sf->multilayer ? (gg_visible | gg_utf8_popup) :
-	    ltype==1 ? (gg_visible | gg_enabled | gg_cb_on | gg_utf8_popup) :
-		(gg_visible | gg_enabled | gg_utf8_popup);
+    lgcd[k].gd.flags = sf->multilayer ? (gg_visible) :
+	    ltype==1 ? (gg_visible | gg_enabled | gg_cb_on) :
+		(gg_visible | gg_enabled);
     lgcd[k].gd.cid = CID_IsOrder2;
     lgcd[k].gd.handle_controlevent = GFI_OrderChange;
     lgcd[k].creator = GRadioCreate;
-    lgcd[k++].gd.popup_msg = (unichar_t *) _(
+    lgcd[k++].gd.popup_msg = _(
 	"Use quadratic (that is truetype) splines to hold the outlines of all\n"
 	"layers of this font rather than cubic (postscript) splines.");
 
@@ -8205,13 +8230,13 @@ return;
     llabel[k].text_is_1byte = true;
     llabel[k].text_in_resource = true;
     lgcd[k].gd.label = &llabel[k];
-    lgcd[k].gd.flags = sf->multilayer ? (gg_visible | gg_utf8_popup) :
-	    ltype<0 ? (gg_visible | gg_enabled | gg_cb_on | gg_utf8_popup) :
-		(gg_visible | gg_enabled | gg_utf8_popup);
+    lgcd[k].gd.flags = sf->multilayer ? (gg_visible) :
+	    ltype<0 ? (gg_visible | gg_enabled | gg_cb_on) :
+		(gg_visible | gg_enabled);
     lgcd[k].gd.handle_controlevent = GFI_OrderChange;
     lgcd[k].gd.cid = CID_IsMixed;
     lgcd[k].creator = GRadioCreate;
-    lgcd[k++].gd.popup_msg = (unichar_t *) _(
+    lgcd[k++].gd.popup_msg = _(
 	"The order of each layer of the font can be controlled\n"
 	"individually. This might be useful if you wished to\n"
 	"retain both quadratic and cubic versions of a font.");
@@ -8236,13 +8261,13 @@ return;
     llabel[k].text_is_1byte = true;
     llabel[k].text_in_resource = true;
     lgcd[k].gd.label = &llabel[k];
-    lgcd[k].gd.flags = sf->multilayer || ltype>=0 ? (gg_visible | gg_utf8_popup ) :
-	    (gg_visible | gg_enabled | gg_utf8_popup);
+    lgcd[k].gd.flags = sf->multilayer || ltype>=0 ? (gg_visible) :
+	    (gg_visible | gg_enabled);
     if ( sf->grid.order2 )
 	lgcd[k].gd.flags |= gg_cb_on;
     lgcd[k].gd.cid = CID_GuideOrder2;
     lgcd[k].creator = GCheckBoxCreate;
-    lgcd[k++].gd.popup_msg = (unichar_t *) _(
+    lgcd[k++].gd.popup_msg = _(
 	"Use quadratic splines for the guidelines layer of the font");
     larray4[1] = &lgcd[k-1]; larray4[2] = GCD_Glue; larray4[3] = NULL;
 
@@ -8283,10 +8308,10 @@ return;
 
     i=0;
     pgcd[i].gd.pos.width = 300; pgcd[i].gd.pos.height = 200;
-    pgcd[i].gd.flags = gg_enabled | gg_visible | gg_utf8_popup;
+    pgcd[i].gd.flags = gg_enabled | gg_visible;
     pgcd[i].gd.cid = CID_Private;
     pgcd[i].gd.u.matrix = &private_mi;
-    pgcd[i].gd.popup_msg = (unichar_t *) _(
+    pgcd[i].gd.popup_msg = _(
 	"The PostScript 'Private' dictionary gives you control over\n"
 	"several font-wide versions of hinting.\n"
 	"The 'Private' dictionary only applies to PostScript fonts.");
@@ -8311,14 +8336,14 @@ return;
     privategcd_def[0].gd.cid = CID_Guess;
     privategcd_def[0].creator = GButtonCreate;
 
-    privategcd_def[1].gd.flags = gg_visible | gg_utf8_popup ;
+    privategcd_def[1].gd.flags = gg_visible;
     privatelabel_def[1].text = (unichar_t *) _("_Histogram");
     privatelabel_def[1].text_is_1byte = true;
     privatelabel_def[1].text_in_resource = true;
     privategcd_def[1].gd.label = &privatelabel_def[1];
     privategcd_def[1].gd.handle_controlevent = PI_Hist;
     privategcd_def[1].gd.cid = CID_Hist;
-    privategcd_def[1].gd.popup_msg = (unichar_t *) _("Histogram Dialog");
+    privategcd_def[1].gd.popup_msg = _("Histogram Dialog");
     privategcd_def[1].creator = GButtonCreate;
 
 /******************************************************************************/
@@ -8372,13 +8397,13 @@ return;
     vlabel[6].text_is_1byte = true;
     vlabel[6].text_in_resource = true;
     vgcd[6].gd.label = &vlabel[6];
-    vgcd[6].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    vgcd[6].gd.popup_msg = (unichar_t *) _("Can this font be embedded in a downloadable (pdf)\ndocument, and if so, what behaviors are permitted on\nboth the document and the font.");
+    vgcd[6].gd.flags = gg_visible | gg_enabled;
+    vgcd[6].gd.popup_msg = _("Can this font be embedded in a downloadable (pdf)\ndocument, and if so, what behaviors are permitted on\nboth the document and the font.");
     vgcd[6].creator = GLabelCreate;
 
     vgcd[7].gd.pos.x = 90; vgcd[7].gd.pos.y = vgcd[6].gd.pos.y-6;
     vgcd[7].gd.pos.width = 140;
-    vgcd[7].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    vgcd[7].gd.flags = gg_visible | gg_enabled;
     vgcd[7].gd.cid = CID_FSType;
     vgcd[7].gd.u.list = fstype;
     vgcd[7].gd.popup_msg = vgcd[6].gd.popup_msg;
@@ -8402,10 +8427,10 @@ return;
     vlabel[8].text = (unichar_t *) _("No Subsetting");
     vlabel[8].text_is_1byte = true;
     vgcd[8].gd.label = &vlabel[8];
-    vgcd[8].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    vgcd[8].gd.flags = gg_visible | gg_enabled;
     if ( sf->pfminfo.fstype!=-1 && (sf->pfminfo.fstype&0x100) )
 	vgcd[8].gd.flags |= gg_cb_on;
-    vgcd[8].gd.popup_msg = (unichar_t *) _("If set then the entire font must be\nembedded in a document when any character is.\nOtherwise the document creator need\nonly include the characters it uses.");
+    vgcd[8].gd.popup_msg = _("If set then the entire font must be\nembedded in a document when any character is.\nOtherwise the document creator need\nonly include the characters it uses.");
     vgcd[8].gd.cid = CID_NoSubsetting;
     vgcd[8].creator = GCheckBoxCreate;
 
@@ -8413,10 +8438,10 @@ return;
     vlabel[9].text = (unichar_t *) _("Only Embed Bitmaps");
     vlabel[9].text_is_1byte = true;
     vgcd[9].gd.label = &vlabel[9];
-    vgcd[9].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    vgcd[9].gd.flags = gg_visible | gg_enabled;
     if ( sf->pfminfo.fstype!=-1 && ( sf->pfminfo.fstype&0x200 ))
 	vgcd[9].gd.flags |= gg_cb_on;
-    vgcd[9].gd.popup_msg = (unichar_t *) _("Only Bitmaps may be embedded.\nOutline descriptions may not be\n(if font file contains no bitmaps\nthen nothing may be embedded).");
+    vgcd[9].gd.popup_msg = _("Only Bitmaps may be embedded.\nOutline descriptions may not be\n(if font file contains no bitmaps\nthen nothing may be embedded).");
     vgcd[9].gd.cid = CID_OnlyBitmaps;
     vgcd[9].creator = GCheckBoxCreate;
 
@@ -8453,8 +8478,8 @@ return;
     vlabel[15].text_is_1byte = true;
     vlabel[15].text_in_resource = true;
     vgcd[15].gd.label = &vlabel[15];
-    vgcd[15].gd.popup_msg = (unichar_t *) _("The 'OS/2' table has changed slightly over the years.\nGenerally fields have been added, but occasionally their\nmeanings have been redefined." );
-    vgcd[15].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    vgcd[15].gd.popup_msg = _("The 'OS/2' table has changed slightly over the years.\nGenerally fields have been added, but occasionally their\nmeanings have been redefined." );
+    vgcd[15].gd.flags = gg_visible | gg_enabled;
     vgcd[15].creator = GLabelCreate;
 
     vgcd[16].gd.pos.x = 90; vgcd[16].gd.pos.y = vgcd[15].gd.pos.y-4; vgcd[16].gd.pos.width = vgcd[7].gd.pos.width;
@@ -8500,8 +8525,8 @@ return;
     vlabel[14].text_in_resource = true;
     vgcd[14].gd.label = &vlabel[14];
     vgcd[14].gd.cid = CID_WeightWidthSlopeOnly;
-    vgcd[14].gd.popup_msg = (unichar_t *) _("MS needs to know whether a font family's members differ\nonly in weight, width and slope (and not in other variables\nlike optical size)." );
-    vgcd[14].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    vgcd[14].gd.popup_msg = _("MS needs to know whether a font family's members differ\nonly in weight, width and slope (and not in other variables\nlike optical size)." );
+    vgcd[14].gd.flags = gg_visible | gg_enabled;
     vgcd[14].creator = GCheckBoxCreate;
 
     vradio[0] = GCD_Glue; vradio[1] = &vgcd[8]; vradio[2] = &vgcd[9]; vradio[3] = GCD_Glue; vradio[4] = NULL;
@@ -8542,15 +8567,15 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("Anything outside the OS/2 WinAscent &\nWinDescent fields will be clipped by windows.\nThis includes marks, etc. that have been repositioned by GPOS.\n(The descent field is usually positive.)\nIf the \"[] Is Offset\" checkbox is clear then\nany number you enter will be the value used in OS/2.\nIf set then any number you enter will be added to the\nfont's bounds. You should leave this\nfield 0 and check \"[*] Is Offset\" in most cases.\n\nNote: WinDescent is a POSITIVE number for\nthings below the baseline");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("Anything outside the OS/2 WinAscent &\nWinDescent fields will be clipped by windows.\nThis includes marks, etc. that have been repositioned by GPOS.\n(The descent field is usually positive.)\nIf the \"[] Is Offset\" checkbox is clear then\nany number you enter will be the value used in OS/2.\nIf set then any number you enter will be added to the\nfont's bounds. You should leave this\nfield 0 and check \"[*] Is Offset\" in most cases.\n\nNote: WinDescent is a POSITIVE number for\nthings below the baseline");
     metgcd[i].gd.cid = CID_WinAscentLab;
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_WinAscent;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8561,7 +8586,7 @@ return;
     metlabel[i].text = (unichar_t *) _("Is Offset");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_WinAscentIsOff;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8575,7 +8600,7 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
     metgcd[i].gd.cid = CID_WinDescentLab;
     metarray[j++] = &metgcd[i];
@@ -8583,7 +8608,7 @@ return;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_WinDescent;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8594,7 +8619,7 @@ return;
     metlabel[i].text = (unichar_t *) _("Is Offset");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_WinDescentIsOff;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8607,10 +8632,10 @@ return;
     metlabel[i].text = (unichar_t *) _("Really use Typo metrics");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_UseTypoMetrics;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("The specification already says that the typo metrics should be\nused to determine line spacing. But so many\nprograms fail to follow the spec. that MS decided an additional\nbit was needed to remind them to do so.");
+    metgcd[i].gd.popup_msg = _("The specification already says that the typo metrics should be\nused to determine line spacing. But so many\nprograms fail to follow the spec. that MS decided an additional\nbit was needed to remind them to do so.");
     metarray[j++] = &metgcd[i]; metarray[j++] = GCD_ColSpan; metarray[j++] = GCD_Glue;
     metgcd[i++].creator = GCheckBoxCreate;
     metarray[j++] = NULL;
@@ -8620,15 +8645,15 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("The typo ascent&descent fields are>supposed<\nto specify the line spacing on windows.\nIn fact usually the win ascent/descent fields do.\n(The descent field is usually negative.)\nIf the \"[] Is Offset\" checkbox is clear then\nany number you enter will be the value used in OS/2.\nIf set then any number you enter will be added to the\nEm-size. You should leave this\nfield 0 and check \"[*] Is Offset\" in most cases.\n\nNOTE: Typo Descent is a NEGATIVE number for\nthings below the baseline");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("The typo ascent&descent fields are>supposed<\nto specify the line spacing on windows.\nIn fact usually the win ascent/descent fields do.\n(The descent field is usually negative.)\nIf the \"[] Is Offset\" checkbox is clear then\nany number you enter will be the value used in OS/2.\nIf set then any number you enter will be added to the\nEm-size. You should leave this\nfield 0 and check \"[*] Is Offset\" in most cases.\n\nNOTE: Typo Descent is a NEGATIVE number for\nthings below the baseline");
     metgcd[i].gd.cid = CID_TypoAscentLab;
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_TypoAscent;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8639,7 +8664,7 @@ return;
     metlabel[i].text = (unichar_t *) _("Is Offset");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_TypoAscentIsOff;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8653,7 +8678,7 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
     metgcd[i].gd.cid = CID_TypoDescentLab;
     metarray[j++] = &metgcd[i];
@@ -8661,7 +8686,7 @@ return;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_TypoDescent;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8672,7 +8697,7 @@ return;
     metlabel[i].text = (unichar_t *) _("Is Offset");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_TypoDescentIsOff;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8686,14 +8711,14 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("Sets the TypoLinegap field in the OS/2 table, used on MS Windows");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("Sets the TypoLinegap field in the OS/2 table, used on MS Windows");
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* Line gap value set later */
     metgcd[i].gd.cid = CID_TypoLineGap;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8707,15 +8732,15 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("This specifies the line spacing on the mac.\n(The descent field is usually negative.)\nIf the \"[] Is Offset\" checkbox is clear then\nany number you enter will be the value used in hhea.\nIf set then any number you enter will be added to the\nfont's bounds. You should leave this\nfield 0 and check \"[*] Is Offset\" in most cases.\n\nNOTE: hhea Descent is a NEGATIVE value for things\nbelow the baseline");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("This specifies the line spacing on the mac.\n(The descent field is usually negative.)\nIf the \"[] Is Offset\" checkbox is clear then\nany number you enter will be the value used in hhea.\nIf set then any number you enter will be added to the\nfont's bounds. You should leave this\nfield 0 and check \"[*] Is Offset\" in most cases.\n\nNOTE: hhea Descent is a NEGATIVE value for things\nbelow the baseline");
     metgcd[i].gd.cid = CID_HHeadAscentLab;
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_HHeadAscent;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8726,7 +8751,7 @@ return;
     metlabel[i].text = (unichar_t *) _("Is Offset");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_HHeadAscentIsOff;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8740,7 +8765,7 @@ return;
     metlabel[i].text_in_resource = true;
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
     metgcd[i].gd.cid = CID_HHeadDescentLab;
     metarray[j++] = &metgcd[i];
@@ -8748,7 +8773,7 @@ return;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_HHeadDescent;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8759,7 +8784,7 @@ return;
     metlabel[i].text = (unichar_t *) _("Is Offset");
     metlabel[i].text_is_1byte = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_HHeadDescentIsOff;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8773,14 +8798,14 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("Sets the linegap field in the hhea table, used on the mac");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("Sets the linegap field in the hhea table, used on the mac");
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* Line gap value set later */
     metgcd[i].gd.cid = CID_LineGap;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8794,15 +8819,15 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = sf->hasvmetrics ? (gg_visible | gg_enabled | gg_utf8_popup) : (gg_visible | gg_utf8_popup);
-    metgcd[i].gd.popup_msg = (unichar_t *) _("Sets the linegap field in the vhea table.\nThis is the horizontal spacing between rows\nof vertically set text.");
+    metgcd[i].gd.flags = sf->hasvmetrics ? (gg_visible | gg_enabled) : (gg_visible);
+    metgcd[i].gd.popup_msg = _("Sets the linegap field in the vhea table.\nThis is the horizontal spacing between rows\nof vertically set text.");
     metgcd[i].gd.cid = CID_VLineGapLab;
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-6;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = sf->hasvmetrics ? (gg_visible | gg_enabled | gg_utf8_popup) : (gg_visible | gg_utf8_popup);
+    metgcd[i].gd.flags = sf->hasvmetrics ? (gg_visible | gg_enabled) : (gg_visible);
 	/* V Line gap value set later */
     metgcd[i].gd.cid = CID_VLineGap;
     metgcd[i].gd.popup_msg = metgcd[17].gd.popup_msg;
@@ -8816,15 +8841,15 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("This denotes the height of X.");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("This denotes the height of X.");
     metgcd[i].gd.cid = CID_CapHeightLab;
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_CapHeight;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -8838,15 +8863,15 @@ return;
     metlabel[i].text_is_1byte = true;
     metlabel[i].text_in_resource = true;
     metgcd[i].gd.label = &metlabel[i];
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    metgcd[i].gd.popup_msg = (unichar_t *) _("This denotes the height of x.");
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
+    metgcd[i].gd.popup_msg = _("This denotes the height of x.");
     metgcd[i].gd.cid = CID_XHeightLab;
     metarray[j++] = &metgcd[i];
     metgcd[i++].creator = GLabelCreate;
 
     metgcd[i].gd.pos.x = 125; metgcd[i].gd.pos.y = metgcd[i-1].gd.pos.y-4;
     metgcd[i].gd.pos.width = 50;
-    metgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    metgcd[i].gd.flags = gg_visible | gg_enabled;
 	/* value set later */
     metgcd[i].gd.cid = CID_XHeight;
     metgcd[i].gd.popup_msg = metgcd[i-1].gd.popup_msg;
@@ -9121,7 +9146,7 @@ return;
     panarray[j++] = &pangcd[i-1]; panarray[j++] = NULL;
 
     pangcd[i].gd.pos.x = 20; pangcd[i].gd.pos.y = pangcd[i-1].gd.pos.y+14+4;
-    panlabel[i].text = (unichar_t *) S_("Panose|_Family");
+    panlabel[i].text = (unichar_t *) S_("Panose|_Family Kind");
     panlabel[i].text_is_1byte = true;
     panlabel[i].text_in_resource = true;
     pangcd[i].gd.label = &panlabel[i];
@@ -9503,11 +9528,11 @@ return;
     gasplabel[i].text_is_1byte = true;
     gasplabel[i].text_in_resource = true;
     gaspgcd[i].gd.label = &gasplabel[i];
-    gaspgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gaspgcd[i].gd.flags = gg_visible | gg_enabled;
     gaspgcd[i].gd.cid = CID_HeadClearType;
     if ( sf->head_optimized_for_cleartype )
 	gaspgcd[i].gd.flags |= gg_cb_on;
-    gaspgcd[i].gd.popup_msg = (unichar_t *) _("Actually a bit in the 'head' table.\nIf unset then certain East Asian fonts will not be hinted");
+    gaspgcd[i].gd.popup_msg = _("Actually a bit in the 'head' table.\nIf unset then certain East Asian fonts will not be hinted");
     gaspharray[j++] = &gaspgcd[i];
     gaspgcd[i++].creator = GCheckBoxCreate;
     gaspharray[j++] = NULL;
@@ -9519,10 +9544,10 @@ return;
     gaspvarray[0] = &gaspboxes[2];
 
     gaspgcd[i].gd.pos.width = 300; gaspgcd[i].gd.pos.height = 200;
-    gaspgcd[i].gd.flags = gg_enabled | gg_visible | gg_utf8_popup;
+    gaspgcd[i].gd.flags = gg_enabled | gg_visible;
     gaspgcd[i].gd.cid = CID_Gasp;
     gaspgcd[i].gd.u.matrix = &gaspmi;
-    gaspgcd[i].gd.popup_msg = (unichar_t *) _(
+    gaspgcd[i].gd.popup_msg = _(
 	"The 'gasp' table gives you control over when grid-fitting and\n"
 	"anti-aliased rasterizing are done.\n"
 	"The table consists of an (ordered) list of pixel sizes each with\n"
@@ -9596,10 +9621,10 @@ return;
 
     tngcd[4].gd.pos.x = 10; tngcd[4].gd.pos.y = tngcd[1].gd.pos.y+14;
     tngcd[4].gd.pos.width = 300; tngcd[4].gd.pos.height = 200;
-    tngcd[4].gd.flags = gg_enabled | gg_visible | gg_utf8_popup;
+    tngcd[4].gd.flags = gg_enabled | gg_visible;
     tngcd[4].gd.cid = CID_TNames;
     tngcd[4].gd.u.matrix = &mi;
-    tngcd[4].gd.popup_msg = (unichar_t *) _(
+    tngcd[4].gd.popup_msg = _(
 	"To create a new name, left click on the <New> button, and select a locale.\n"
 	"To change the locale, left click on it.\n"
 	"To change the string type, left click on it.\n"
@@ -9610,7 +9635,7 @@ return;
     tngcd[4].data = d;
     tngcd[4].creator = GMatrixEditCreate;
 
-    tngcd[5].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    tngcd[5].gd.flags = gg_visible | gg_enabled;
 /* GT: when translating this please leave the "SIL Open Font License" in */
 /* GT: English (possibly translating it in parentheses). I believe there */
 /* GT: are legal reasons for this. */
@@ -9622,18 +9647,18 @@ return;
     tnlabel[5].text_in_resource = true;
     tngcd[5].gd.label = &tnlabel[5];
     tngcd[5].gd.handle_controlevent = GFI_AddOFL;
-    tngcd[5].gd.popup_msg = (unichar_t *) _(
+    tngcd[5].gd.popup_msg = _(
 	"Click here to add the OFL metadata to your own font in the License and License URL fields. \n"
 	"Then click on the License field to fill in the placeholders in sync with OFL.txt. \n");
     tngcd[5].creator = GButtonCreate;
 
-    tngcd[6].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    tngcd[6].gd.flags = gg_visible | gg_enabled;
     tnlabel[6].text = (unichar_t *) S_("scripts.sil.org/OFL");
     tnlabel[6].text_is_1byte = true;
     tnlabel[6].text_in_resource = true;
     tngcd[6].gd.label = &tnlabel[6];
     tngcd[6].gd.handle_controlevent = GFI_HelpOFL;
-    tngcd[6].gd.popup_msg = (unichar_t *) _(
+    tngcd[6].gd.popup_msg = _(
 	"Click here for more information about the OFL (SIL Open Font License) \n"
 	"including the corresponding FAQ. \n");
     tngcd[6].creator = GButtonCreate;
@@ -9667,10 +9692,10 @@ return;
     ssvarray[0] = &ssngcd[0];
 
     ssngcd[1].gd.pos.width = 300; ssngcd[1].gd.pos.height = 200;
-    ssngcd[1].gd.flags = gg_enabled | gg_visible | gg_utf8_popup;
+    ssngcd[1].gd.flags = gg_enabled | gg_visible;
     ssngcd[1].gd.cid = CID_SSNames;
     ssngcd[1].gd.u.matrix = &ssmi;
-    ssngcd[1].gd.popup_msg = (unichar_t *) _(
+    ssngcd[1].gd.popup_msg = _(
 	"To create a new name, left click on the <New> button, and select a locale (language).\n"
 	"To change the locale, left click on it.\n"
 	"To change the feature, left click on it.\n"
@@ -9833,12 +9858,12 @@ return;
 	sprintf( woffmajorbuf, "%d", sf->woffMajor );
 	sprintf( woffminorbuf, "%d", sf->woffMinor );
     }
-    woffgcd[1].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    woffgcd[1].gd.flags = gg_visible | gg_enabled;
     wofflabel[1].text = (unichar_t *) woffmajorbuf;
     wofflabel[1].text_is_1byte = true;
     woffgcd[1].gd.label = &wofflabel[1];
     woffgcd[1].gd.cid = CID_WoffMajor;
-    woffgcd[1].gd.popup_msg = (unichar_t *) _("If you leave this field blank FontForge will use a default based on\neither the version string, or one in the 'name' table." );
+    woffgcd[1].gd.popup_msg = _("If you leave this field blank FontForge will use a default based on\neither the version string, or one in the 'name' table." );
     woffgcd[1].creator = GTextFieldCreate;
 
     wofflabel[2].text = (unichar_t *) _("Minor:");
@@ -9847,12 +9872,12 @@ return;
     woffgcd[2].gd.flags = gg_visible | gg_enabled;
     woffgcd[2].creator = GLabelCreate;
 
-    woffgcd[3].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    woffgcd[3].gd.flags = gg_visible | gg_enabled;
     wofflabel[3].text = (unichar_t *) woffminorbuf;
     wofflabel[3].text_is_1byte = true;
     woffgcd[3].gd.label = &wofflabel[3];
     woffgcd[3].gd.cid = CID_WoffMinor;
-    woffgcd[3].gd.popup_msg = (unichar_t *) _("If you leave this field blank FontForge will use a default based on\neither the version string, or one in the 'name' table." );
+    woffgcd[3].gd.popup_msg = _("If you leave this field blank FontForge will use a default based on\neither the version string, or one in the 'name' table." );
     woffgcd[3].creator = GTextFieldCreate;
 
     woffarray[0] = &woffgcd[0];
@@ -9930,8 +9955,8 @@ return;
 	txlabel[k].text_is_1byte = true;
 	txgcd[k].gd.label = &txlabel[k];
 	txgcd[k].gd.pos.x = 10; txgcd[k].gd.pos.y = txgcd[k-2].gd.pos.y+26;
-	txgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-	txgcd[k].gd.popup_msg = (unichar_t *) texpopups[i];
+	txgcd[k].gd.flags = gg_visible | gg_enabled;
+	txgcd[k].gd.popup_msg = texpopups[i];
 	txarray2[j++] = &txgcd[k];
 	txgcd[k++].creator = GLabelCreate;
 
@@ -9990,8 +10015,8 @@ return;
     szlabel[k].text_in_resource = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 10; szgcd[k].gd.pos.y = 9;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("The size (in points) for which this face was designed");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("The size (in points) for which this face was designed");
     szgcd[k++].creator = GLabelCreate;
 
     sprintf(dszbuf, "%.1f", sf->design_size/10.0);
@@ -10008,16 +10033,16 @@ return;
     szlabel[k].text_is_1byte = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 134; szgcd[k].gd.pos.y = szgcd[k-2].gd.pos.y;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("The size (in points) for which this face was designed");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("The size (in points) for which this face was designed");
     szgcd[k++].creator = GLabelCreate;
 
     szlabel[k].text = (unichar_t *) _("Design Range");
     szlabel[k].text_is_1byte = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 14; szgcd[k].gd.pos.y = szgcd[k-2].gd.pos.y+24;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("The range of sizes (in points) to which this face applies.\nLower bound is exclusive, upper bound is inclusive.");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("The range of sizes (in points) to which this face applies.\nLower bound is exclusive, upper bound is inclusive.");
     szgcd[k++].creator = GLabelCreate;
 
     szgcd[k].gd.pos.x = 8; szgcd[k].gd.pos.y = GDrawPointsToPixels(NULL,szgcd[k-1].gd.pos.y+6);
@@ -10030,8 +10055,8 @@ return;
     szlabel[k].text_in_resource = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 14; szgcd[k].gd.pos.y = szgcd[k-2].gd.pos.y+18;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("The range of sizes (in points) to which this face applies.\nLower bound is exclusive, upper bound is inclusive.");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("The range of sizes (in points) to which this face applies.\nLower bound is exclusive, upper bound is inclusive.");
     szgcd[k++].creator = GLabelCreate;
 
     sprintf(dsbbuf, "%.1f", sf->design_range_bottom/10.0);
@@ -10049,8 +10074,8 @@ return;
     szlabel[k].text_in_resource = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 140; szgcd[k].gd.pos.y = szgcd[k-2].gd.pos.y;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("The range of sizes (in points) to which this face applies.\nLower bound is exclusive, upper bound is inclusive.");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("The range of sizes (in points) to which this face applies.\nLower bound is exclusive, upper bound is inclusive.");
     szgcd[k++].creator = GLabelCreate;
 
     sprintf(dstbuf, "%.1f", sf->design_range_top/10.0);
@@ -10068,8 +10093,8 @@ return;
     szlabel[k].text_in_resource = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 14; szgcd[k].gd.pos.y = GDrawPixelsToPoints(NULL,szgcd[k-5].gd.pos.y+szgcd[k-5].gd.pos.height)+10;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("This is an identifying number shared by all members of\nthis font family with the same style (I.e. 10pt Bold and\n24pt Bold would have the same id, but 10pt Italic would not");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("This is an identifying number shared by all members of\nthis font family with the same style (I.e. 10pt Bold and\n24pt Bold would have the same id, but 10pt Italic would not");
     szgcd[k++].creator = GLabelCreate;
 
     sprintf(sibuf, "%d", sf->fontstyle_id);
@@ -10086,15 +10111,15 @@ return;
     szlabel[k].text_is_1byte = true;
     szgcd[k].gd.label = &szlabel[k];
     szgcd[k].gd.pos.x = 14; szgcd[k].gd.pos.y = szgcd[k-2].gd.pos.y+22;
-    szgcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    szgcd[k].gd.popup_msg = (unichar_t *) _("This provides a set of names used to identify the\nstyle of this font. Names may be translated into multiple\nlanguages (English is required, others are optional)\nAll fonts with the same Style ID should share this name.");
+    szgcd[k].gd.flags = gg_visible | gg_enabled;
+    szgcd[k].gd.popup_msg = _("This provides a set of names used to identify the\nstyle of this font. Names may be translated into multiple\nlanguages (English is required, others are optional)\nAll fonts with the same Style ID should share this name.");
     szgcd[k++].creator = GLabelCreate;
 
     szgcd[k].gd.pos.width = 300; szgcd[k].gd.pos.height = 200;
-    szgcd[k].gd.flags = gg_enabled | gg_visible | gg_utf8_popup;
+    szgcd[k].gd.flags = gg_enabled | gg_visible;
     szgcd[k].gd.cid = CID_StyleName;
     szgcd[k].gd.u.matrix = &sizemi;
-    szgcd[k].gd.popup_msg = (unichar_t *) _(
+    szgcd[k].gd.popup_msg = _(
 	"To create a new name, left click on the <New> button, and select a locale (language).\n"
 	"To change the locale, left click on it.\n"
 	"To change the text, left click in it and then type.\n"
@@ -10216,8 +10241,8 @@ return;
 
     i=0;
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Moves the currently selected lookup to be first in the lookup ordering\nor moves the currently selected subtable to be first in its lookup.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Moves the currently selected lookup to be first in the lookup ordering\nor moves the currently selected subtable to be first in its lookup.");
     lkbuttonslabel[i].text = (unichar_t *) _("_Top");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10227,8 +10252,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Moves the currently selected lookup before the previous lookup\nor moves the currently selected subtable before the previous subtable.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Moves the currently selected lookup before the previous lookup\nor moves the currently selected subtable before the previous subtable.");
     lkbuttonslabel[i].text = (unichar_t *) _("_Up");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10238,8 +10263,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Moves the currently selected lookup after the next lookup\nor moves the currently selected subtable after the next subtable.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Moves the currently selected lookup after the next lookup\nor moves the currently selected subtable after the next subtable.");
     lkbuttonslabel[i].text = (unichar_t *) _("_Down");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10249,8 +10274,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Moves the currently selected lookup to the end of the lookup chain\nor moves the currently selected subtable to be the last subtable in the lookup");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Moves the currently selected lookup to the end of the lookup chain\nor moves the currently selected subtable to be the last subtable in the lookup");
     lkbuttonslabel[i].text = (unichar_t *) _("_Bottom");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10260,8 +10285,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Sorts the lookups in a default ordering based on feature tags");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Sorts the lookups in a default ordering based on feature tags");
     lkbuttonslabel[i].text = (unichar_t *) _("_Sort");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10275,8 +10300,8 @@ return;
     lkbuttonsgcd[i++].creator = GLineCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_enabled | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Adds a new lookup after the selected lookup\nor at the start of the lookup list if nothing is selected.");
+    lkbuttonsgcd[i].gd.flags = gg_visible | gg_enabled;
+    lkbuttonsgcd[i].gd.popup_msg = _("Adds a new lookup after the selected lookup\nor at the start of the lookup list if nothing is selected.");
     lkbuttonslabel[i].text = (unichar_t *) _("Add _Lookup");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10286,8 +10311,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Adds a new lookup subtable after the selected subtable\nor at the start of the lookup if nothing is selected.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Adds a new lookup subtable after the selected subtable\nor at the start of the lookup if nothing is selected.");
     lkbuttonslabel[i].text = (unichar_t *) _("Add Sub_table");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10297,8 +10322,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Edits a lookup or lookup subtable.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Edits a lookup or lookup subtable.");
     lkbuttonslabel[i].text = (unichar_t *) _("Edit _Metadata");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10308,8 +10333,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Edits the transformations in a lookup subtable.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Edits the transformations in a lookup subtable.");
     lkbuttonslabel[i].text = (unichar_t *) _("_Edit Data");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10319,8 +10344,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Deletes any selected lookups and their subtables, or deletes any selected subtables.\nThis will also delete any transformations associated with those subtables.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Deletes any selected lookups and their subtables, or deletes any selected subtables.\nThis will also delete any transformations associated with those subtables.");
     lkbuttonslabel[i].text = (unichar_t *) _("De_lete");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10330,8 +10355,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Merges two selected (and compatible) lookups into one,\nor merges two selected subtables of a lookup into one");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Merges two selected (and compatible) lookups into one,\nor merges two selected subtables of a lookup into one");
     lkbuttonslabel[i].text = (unichar_t *) _("_Merge");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10341,8 +10366,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Reverts the lookup list to its original condition.\nBut any changes to subtable data will remain.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Reverts the lookup list to its original condition.\nBut any changes to subtable data will remain.");
     lkbuttonslabel[i].text = (unichar_t *) _("_Revert");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10352,8 +10377,8 @@ return;
     lkbuttonsgcd[i++].creator = GButtonCreate;
 
     lkbuttonsarray[i] = &lkbuttonsgcd[i];
-    lkbuttonsgcd[i].gd.flags = gg_visible | gg_utf8_popup ;
-    lkbuttonsgcd[i].gd.popup_msg = (unichar_t *) _("Imports a lookup (and all its subtables) from another font.");
+    lkbuttonsgcd[i].gd.flags = gg_visible;
+    lkbuttonsgcd[i].gd.popup_msg = _("Imports a lookup (and all its subtables) from another font.");
     lkbuttonslabel[i].text = (unichar_t *) _("_Import");
     lkbuttonslabel[i].text_is_1byte = true;
     lkbuttonslabel[i].text_in_resource = true;
@@ -10528,10 +10553,10 @@ return;
     ugcd[3].gd.pos.x = 12; ugcd[3].gd.pos.y = 30;
     ugcd[3].gd.pos.width = ngcd[15].gd.pos.width;
     ugcd[3].gd.pos.height = 200;
-    ugcd[3].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    ugcd[3].gd.flags = gg_visible | gg_enabled;
     ugcd[3].gd.cid = CID_Unicode;
     ugcd[3].gd.handle_controlevent = GFI_UnicodeRangeChange;
-    ugcd[3].gd.popup_msg = (unichar_t *) _("Click on a range to select characters in that range.\nDouble click on a range to see characters that should be\nin the range but aren't.");
+    ugcd[3].gd.popup_msg = _("Click on a range to select characters in that range.\nDouble click on a range to see characters that should be\nin the range but aren't.");
     ugcd[3].creator = GListCreate;
 
     uarray[0] = &ugcd[0]; uarray[1] = &ubox[2]; uarray[2] = &ugcd[2]; uarray[3] = &ugcd[3]; uarray[4] = NULL;
@@ -10873,10 +10898,6 @@ return;
 }
 
 void FontMenuFontInfo(void *_fv) {
-    if ( _fv && collabclient_inSessionFV( _fv) ) {
-	gwwv_post_error(_("Feature Not Available"), _("The Font Information Dialog is not available in collaboration mode yet."));
-	return;
-    }
     FontInfo( ((FontViewBase *) _fv)->sf,((FontViewBase *) _fv)->active_layer,-1,false);
 }
 

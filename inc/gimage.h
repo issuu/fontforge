@@ -24,15 +24,18 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _GIMAGE_H
-#define _GIMAGE_H
-#include <basics.h>
+
+#ifndef FONTFORGE_GIMAGE_H
+#define FONTFORGE_GIMAGE_H
+
+#include "basics.h"
 
 typedef uint32 Color;
 
 #define COLOR_UNKNOWN		((Color) 0xffffffff)
 #define COLOR_TRANSPARENT	((Color) 0xffffffff)
 #define COLOR_DEFAULT		((Color) 0xfffffffe)
+#define COLOR_WHITE		((Color) 0xffffff)
 #define COLOR_CREATE(r,g,b)	(((r)<<16) | ((g)<<8) | (b))
 #define COLOR_ALPHA(col)	(((col)>>24))
 #define COLOR_RED(col)		(((col)>>16) & 0xff)
@@ -135,31 +138,16 @@ extern void GImageDestroy(GImage *gi);
 extern GImage *GImageCreateAnimation(GImage **images, int n);
 extern GImage *GImageAddImageBefore(GImage *dest, GImage *src, int pos);
 
-extern GImage *GImageBaseGetSub(struct _GImage *base, enum image_type it, GRect *src, GClut *nclut, RevCMap *rev);
-extern GImage *GImageGetSub(GImage *image,enum image_type it, GRect *src, GClut *nclut, RevCMap *rev);
-extern int GImageInsertToBase(struct _GImage *tobase, GImage *from, GRect *src, RevCMap *rev,
-	int to_x, int to_y, enum pastetrans_type ptt );
-extern int GImageInsert(GImage *to, GImage *from, GRect *src, RevCMap *rev,
-	int to_x, int to_y, enum pastetrans_type ptt );
-extern Color _GImageGetPixelColor(struct _GImage *base,int x, int y);	/* Obsolete */
-extern Color GImageGetPixelColor(GImage *base,int x, int y);		/* Obsolete */
 extern Color GImageGetPixelRGBA(GImage *base,int x, int y);
 extern int GImageGetWidth(GImage *);
 extern int GImageGetHeight(GImage *);
 extern void *GImageGetUserData(GImage *img);
 extern void GImageSetUserData(GImage *img,void *userdata);
-extern void GImageResize(struct _GImage *tobase, struct _GImage *fbase,
-	GRect *src, RevCMap *rev);
-extern GImage *GImageResize32(GImage *from, GRect *src, int width, int height, Color trans);
-extern GImage *GImageResizeSame(GImage *from, GRect *src, int width, int height, RevCMap *rev);
 extern RevCMap *GClutReverse(GClut *clut,int side_size);
 void GClut_RevCMapFree(RevCMap *rev);
 extern GClut *GImageFindCLUT(GImage *image,GClut *clut,int clutmax);
-extern int GImageSameClut(GClut *clut,GClut *nclut);
 extern int GImageGreyClut(GClut *clut);
-extern Color GImageColourFName(unichar_t *name);
 extern Color _GImage_ColourFName(char *name);
-extern char *GImageNameFColour(Color col);
 extern Color GDrawColorDarken(Color col, int by);
 extern Color GDrawColorBrighten(Color col, int by);
 
@@ -172,7 +160,6 @@ extern int GImageWriteXbm(GImage *gi, char *filename);
 extern GImage *GImageReadXbm(char *filename);
 extern int GImageWriteXpm(GImage *gi, char *filename);
 extern GImage *GImageReadXpm(char *filename);
-extern int GImageWriteEps(GImage *gi, char *filename);
 extern GImage *GImageReadTiff(char *filename);
 extern GImage *GImageReadJpeg(char *filename);
 extern GImage *GImageRead_Jpeg(FILE *fp);
@@ -180,8 +167,10 @@ extern int GImageWrite_Jpeg(GImage *gi, FILE *outfile, int quality, int progress
 extern int GImageWriteJpeg(GImage *gi, char *filename, int quality, int progressive);
 extern GImage *GImageRead_Png(FILE *fp);
 extern GImage *GImageReadPng(char *filename);
+extern GImage *GImageReadPngBuf(char* buf, size_t sz);
 extern int GImageWrite_Png(GImage *gi, FILE *fp, int progressive);
 extern int GImageWritePng(GImage *gi, char *filename, int progressive);
+extern int GImageWritePngBuf(GImage *gi, char** buf, size_t* sz, int compression_level, int progressive);
 extern GImage *GImageReadGif(char *filename);
 extern int GImageWriteGif(GImage *gi,char *filename,int progressive);
 extern GImage *GImageReadRas(char *filename);		/* Sun Raster */
@@ -201,4 +190,4 @@ extern void gColor2Hslrgba(struct hslrgba *col,Color from);
 extern Color gHslrgb2Color(struct hslrgb *col);
 extern Color gHslrgba2Color(struct hslrgba *col);
 
-#endif
+#endif /* FONTFORGE_GIMAGE_H */

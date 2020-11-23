@@ -24,16 +24,17 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-#include "ustring.h"
+
+#include <fontforge-config.h>
+
 #include "ffglib.h"
-#include <glib/gprintf.h>
 #include "gdraw.h"
-#include "gwidget.h"
 #include "ggadget.h"
 #include "ggadgetP.h"
+#include "gwidget.h"
+#include "ustring.h"
+
+#include <stdarg.h>
 
 static GWindow last;
 static const char *last_title;
@@ -163,8 +164,6 @@ static GWindow DlgCreate(const unichar_t *title,const unichar_t *question,va_lis
     if ( d!=NULL )
 	memset(d,0,sizeof(*d));
     GGadgetInit();
-    /* u_vsnprintf(ubuf,sizeof(ubuf)/sizeof(ubuf[0]),question,ap);*/
-    /* u_vsnprintf() also assumes UCS4 string is null terminated */
     qbuf = g_ucs4_to_utf8( (const gunichar *)question, -1, NULL, NULL, NULL );
     if( !qbuf ) {
 	fprintf( stderr, "Failed to convert question string in DlgCreate()\n" );
@@ -838,7 +837,7 @@ void GWidgetError8(const char *title,const char *statement, ...) {
 
 static GWindow ChoiceDlgCreate8(struct dlg_info *d,const char *title,
 	const char *question, va_list ap,
-	const char **choices, int cnt, char *multisel,
+	const char **choices, int cnt, const char *multisel,
 	char *buts[2], int def,
 	int restrict_input, int center) {
     GTextInfo qlabels[GLINE_MAX+1], *llabels, blabel[4];
@@ -1118,7 +1117,7 @@ return( -2 );
 return(d.ret);
 }
 
-int GWidgetChoicesBM8(char *title, const char **choices,char *sel,
+int GWidgetChoicesBM8(const char *title, const char **choices,char *sel,
 	int cnt, char *buts[2], const char *question,...) {
     struct dlg_info d;
     GWindow gw;

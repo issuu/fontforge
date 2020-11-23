@@ -24,22 +24,46 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "macbinary.h"
+
+#include "bvedit.h"
+#include "crctab.h"
+#include "dumppfa.h"
+#include "encoding.h"
 #include "fontforgevw.h"
+#include "fvfonts.h"
+#include "gfile.h"
+#include "gutils.h"
+#include "lookups.h"
+#include "mem.h"
+#include "parsepfa.h"
+#include "parsettf.h"
+#include "psfont.h"
+#include "splinefill.h"
+#include "splinesave.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottf.h"
+#include "tottfgpos.h"
+#include "ttf.h"
+#include "ustring.h"
+
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <math.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <time.h>
-#include <ustring.h>
-#include "ttf.h"
-#include "psfont.h"
+#include <sys/types.h>
+#include <unistd.h>
 #if __Mac
-# include <ctype.h>
 # include "carbon.h"
+
+# include <ctype.h>
 #else
-# include <utype.h>
+# include "utype.h"
 #undef __Mac
 #define __Mac 0
 #endif
@@ -103,7 +127,6 @@ const int mac_dpi = 72;
 /* Crc code taken from: */
 /* http://www.ctan.org/tex-archive/tools/macutils/crc/ */
 /* MacBinary files use the same CRC that binhex does (in the MacBinary header) */
-extern unsigned long binhex_crc(unsigned char *buffer,int size);
 
 /* ******************************** Creation ******************************** */
 
@@ -280,6 +303,7 @@ static struct resource *PSToResources(FILE *res,FILE *pfbfile) {
     for (;;) {
 	if ( getc(pfbfile)!=0x80 ) {
 	    IError("We made a pfb file, but didn't get one. Hunh?" );
+            free(resstarts);
 return( NULL );
 	}
 	type = getc(pfbfile);
@@ -1340,9 +1364,8 @@ static void DumpResourceMap(FILE *res,struct resourcetype *rtypes,enum fontforma
 }
 
 long mactime(void) {
-    time_t now;
+    time_t now = GetTime();
 
-    time(&now);
     /* convert from 1970 based time to 1904 based time */
     now += (1970-1904)*365L*24*60*60+((1970-1904)>>2)*24*60*60;
     /* Ignore any leap seconds -- Sorry Steve */
@@ -1404,7 +1427,6 @@ static int DumpMacBinaryHeader(FILE *res,struct macbinaryheader *mb) {
 
 	/* Creation time, (seconds from 1/1/1904) */
     now = mactime();
-    time(&now);
     *hpt++ = now>>24; *hpt++ = now>>16; *hpt++ = now>>8; *hpt++ = now;
 	/* Modification time, (seconds from 1/1/1904) */
     *hpt++ = now>>24; *hpt++ = now>>16; *hpt++ = now>>8; *hpt++ = now;
@@ -1557,7 +1579,7 @@ int WriteMacPSFont(char *filename,SplineFont *sf,enum fontformat format,
     char *pt;
 #endif
 
-    temppfb = tmpfile();
+    temppfb = GFileTmpfile();
     if ( temppfb==NULL )
 return( 0 );
 
@@ -1585,7 +1607,7 @@ return( 0 );
     }
 
     if ( __Mac && format==ff_pfbmacbin )
-	res = tmpfile();
+	res = GFileTmpfile();
     else
 	res = fopen(filename,"wb+");
     if ( res==NULL ) {
@@ -1635,7 +1657,7 @@ int WriteMacTTFFont(char *filename,SplineFont *sf,enum fontformat format,
     struct resource rlist[3][2], *dummynfnts=NULL;
     struct macbinaryheader header;
 
-    tempttf = tmpfile();
+    tempttf = GFileTmpfile();
     if ( tempttf==NULL )
 return( 0 );
 
@@ -1648,8 +1670,8 @@ return( 0 );
     if ( bf!=bf_ttf && bf!=bf_sfnt_dfont )
 	bsizes = NULL;		/* as far as the FOND for the truetype is concerned anyway */
 
-    if ( (__Mac && format==ff_ttfmacbin) || strstr(filename,"://")!=NULL )
-	res = tmpfile();
+    if ( __Mac && format==ff_ttfmacbin )
+	res = GFileTmpfile();
     else
 	res = fopen(filename,"wb+");
     if ( res==NULL ) {
@@ -1695,8 +1717,6 @@ return( 0 );
 	ret = DumpMacBinaryHeader(res,&header);
     }
     if ( ferror(res) ) ret = false;
-    if ( ret && strstr(filename,"://")!=NULL )
-	ret = URLFromFile(filename,res);
     if ( fclose(res)==-1 ) ret = 0;
 return( ret );
 }
@@ -1728,7 +1748,7 @@ int WriteMacBitmaps(char *filename,SplineFont *sf, int32 *sizes, int is_dfont,
     strcpy(dpt,is_dfont?".bmap.dfont":__Mac?".bmap":".bmap.bin");
 
     if ( __Mac && !is_dfont )
-	res = tmpfile();
+	res = GFileTmpfile();
     else
 	res = fopen(binfilename,"wb+");
     if ( res==NULL ) {
@@ -1820,7 +1840,7 @@ return( 0 );
 	}
     } else if ( format!=ff_none || bf==bf_sfnt_dfont ) {
 	for ( sfi=sfs; sfi!=NULL; sfi = sfi->next ) {
-	    sfi->tempttf = tmpfile();
+	    sfi->tempttf = GFileTmpfile();
 	    if ( sfi->tempttf==NULL ||
 		    _WriteTTFFont(sfi->tempttf,sfi->sf,format==ff_none?ff_none:
 					  format==ff_ttfmacbin?ff_ttf:
@@ -1836,7 +1856,7 @@ return( 0 );
 
     if ( __Mac && (format==ff_ttfmacbin || format==ff_pfbmacbin ||
 	    (format==ff_none && bf==bf_nfntmacbin)))
-	res = tmpfile();
+	res = GFileTmpfile();
     else
 	res = fopen(filename,"wb+");
     if ( res==NULL ) {
@@ -1947,7 +1967,7 @@ static SplineFont *SearchPostScriptResources(FILE *f,long rlistpos,int subcnt,lo
     SplineFont *sf;
 
     fseek(f,rlistpos,SEEK_SET);
-    rsrcids = calloc(subcnt,sizeof(short));
+    rsrcids = calloc(subcnt,sizeof(unsigned short));
     offsets = calloc(subcnt,sizeof(long));
     for ( i=0; i<subcnt; ++i ) {
 	rsrcids[i] = getushort(f);
@@ -1959,11 +1979,12 @@ static SplineFont *SearchPostScriptResources(FILE *f,long rlistpos,int subcnt,lo
 	/* mbz = */ getlong(f);
     }
 
-    pfb = tmpfile();
+    pfb = GFileTmpfile();
     if ( pfb==NULL ) {
 	LogError( _("Can't open temporary file for postscript output\n") );
 	fseek(f,here,SEEK_SET );
 	free(offsets);
+	free(rsrcids);
 return(NULL);
     }
 
@@ -2063,8 +2084,8 @@ static SplineFont *SearchTtfResources(FILE *f,long rlistpos,int subcnt,long rdat
     SplineFont *sf;
     int which = 0;
     char **names;
-    char *pt,*lparen, *rparen;
-    char *chosenname=NULL;
+    char *pt,*lparen;
+    char *find=NULL,*chosenname=NULL;
 
     fseek(f,rlistpos,SEEK_SET);
     if ( subcnt>1 || (flags&ttf_onlynames) ) {
@@ -2089,15 +2110,9 @@ static SplineFont *SearchTtfResources(FILE *f,long rlistpos,int subcnt,long rdat
 return( (SplineFont *) names );
 	}
 	if ((pt = strrchr(filename,'/'))==NULL ) pt = filename;
-	/* Someone gave me a font "Nafees Nastaleeq(Updated).ttf" and complained */
-	/*  that ff wouldn't open it */
-	/* Now someone will complain about "Nafees(Updated).ttc(fo(ob)ar)" */
-	if ( (lparen = strrchr(pt,'('))!=NULL &&
-		(rparen = strrchr(lparen,')'))!=NULL &&
-		rparen[1]=='\0' ) {
-	    char *find = copy(lparen+1);
-	    pt = strchr(find,')');
-	    if ( pt!=NULL ) *pt='\0';
+	if ( (lparen = SFSubfontnameStart(pt)) ) {
+	    find = copy(lparen+1);
+	    find[strlen(find)-1] = '\0';
 	    for ( which=subcnt-1; which>=0; --which )
 		if ( strcmp(names[which],find)==0 )
 	    break;
@@ -2137,7 +2152,7 @@ return( (SplineFont *) names );
     continue;
 	here = ftell(f);
 
-	ttf = tmpfile();
+	ttf = GFileTmpfile();
 	if ( ttf==NULL ) {
 	    LogError( _("Can't open temporary file for truetype output.\n") );
     continue;
@@ -2163,7 +2178,7 @@ return( (SplineFont *) names );
 	    len += temp;
 	}
 	rewind(ttf);
-	sf = _SFReadTTF(ttf,flags,openflags,NULL,NULL);
+	sf = _SFReadTTF(ttf,flags,openflags,NULL,NULL,NULL);
 	fclose(ttf);
 	if ( sf!=NULL ) {
 	    free(buffer);
@@ -2466,9 +2481,9 @@ static void LoadNFNT(FILE *f,long offset, SplineFont *sf) {
     font.leading = getushort(f);
     font.rowWords = getushort(f);
     if ( font.rowWords!=0 ) {
-	font.fontImage = calloc(font.rowWords*font.fRectHeight,sizeof(short));
-	font.locs = calloc(font.lastChar-font.firstChar+3,sizeof(short));
-	font.offsetWidths = calloc(font.lastChar-font.firstChar+3,sizeof(short));
+	font.fontImage = calloc(font.rowWords*font.fRectHeight,sizeof(unsigned short));
+	font.locs = calloc(font.lastChar-font.firstChar+3,sizeof(unsigned short));
+	font.offsetWidths = calloc(font.lastChar-font.firstChar+3,sizeof(unsigned short));
 	for ( i=0; i<font.rowWords*font.fRectHeight; ++i )
 	    font.fontImage[i] = getushort(f);
 	for ( i=0; i<font.lastChar-font.firstChar+3; ++i )
@@ -2560,15 +2575,15 @@ static FOND *PickFOND(FOND *fondlist,char *filename,char **name, int *style) {
     char *find = NULL;
 
     if ((pt = strrchr(filename,'/'))!=NULL ) pt = filename;
-    if ( (lparen = strchr(filename,'('))!=NULL && strchr(lparen,')')!=NULL ) {
+    if ( (lparen = SFSubfontnameStart(pt)) ) {
 	find = copy(lparen+1);
-	pt = strchr(find,')');
-	if ( pt!=NULL ) *pt='\0';
+	find[strlen(find)-1] = '\0';
 	for ( test=fondlist; test!=NULL; test=test->next ) {
 	    for ( i=0; i<48; ++i )
 		if ( test->psnames[i]!=NULL && strcmp(find,test->psnames[i])==0 ) {
 		    *style = (i&3) | ((i&~3)<<1);	/* PS styles skip underline bit */
 		    *name = copy(test->psnames[i]);
+		    free(find);
 return( test );
 		}
 	}
@@ -2651,8 +2666,10 @@ static SplineFont *SearchBitmapResources(FILE *f,long rlistpos,int subcnt,long r
     SplineChar *sc;
 
     fond = PickFOND(fondlist,filename,&name,&style);
-    if ( fond==NULL )
+    if ( fond==NULL ) {
+	free(name);
 return( NULL );
+    }
 
     find_id=-1;
     if ( flags&ttf_onlyonestrike ) {
@@ -2728,8 +2745,10 @@ static SplineFont *FindFamilyStyleKerns(SplineFont *into,EncMap *map,FOND *fondl
     SplineChar *sc1, *sc2;
 
     fond = PickFOND(fondlist,filename,&name,&style);
-    if ( fond==NULL || into==NULL )
+    if ( fond==NULL || into==NULL ) {
+        free(name);
 return( NULL );
+    }
     for ( i=0; i<fond->stylekerncnt; ++i )
 	if ( fond->stylekerns[i].style==style )
     break;
@@ -2761,29 +2780,32 @@ return( NULL );
 	}
 	kp->off = offset;
     }
+    free(name);
 return( into );
 }
 
 /* Look for a bare truetype font in a binhex/macbinary wrapper */
 static SplineFont *MightBeTrueType(FILE *binary,int32 pos,int32 dlen,int flags,
 	enum openflags openflags) {
-    FILE *temp = tmpfile();
-    char *buffer = malloc(8192);
+    FILE *temp = NULL;
+    char *buffer = NULL;
     int len;
     SplineFont *sf;
 
     if ( flags&ttf_onlynames ) {
 	char **ret;
-	char *temp = TTFGetFontName(binary,pos,pos);
-	if ( temp==NULL )
+	char *tempFontName = TTFGetFontName(binary,pos,pos);
+	if ( tempFontName==NULL )
 return( NULL );
 	ret = malloc(2*sizeof(char *));
-	ret[0] = temp;
+	ret[0] = tempFontName;
 	ret[1] = NULL;
 return( (SplineFont *) ret );
     }
 
     fseek(binary,pos,SEEK_SET);
+    buffer = malloc(8192);
+    temp = GFileTmpfile();
     while ( dlen>0 ) {
 	len = dlen > 8192 ? 8192 : dlen;
 	len = fread(buffer,1,dlen > 8192 ? 8192 : dlen,binary);
@@ -2793,7 +2815,7 @@ return( (SplineFont *) ret );
 	dlen -= len;
     }
     rewind(temp);
-    sf = _SFReadTTF(temp,flags,openflags,NULL,NULL);
+    sf = _SFReadTTF(temp,flags,openflags,NULL,NULL,NULL);
     fclose(temp);
     free(buffer);
 return( sf );
@@ -2984,7 +3006,7 @@ static SplineFont *IsResourceInHex(FILE *f,char *filename,int flags,enum openfla
 	SplineFont *into,EncMap *map) {
     /* convert file from 6bit to 8bit */
     /* interesting data is enclosed between two colons */
-    FILE *binary = tmpfile();
+    FILE *binary = GFileTmpfile();
     char *sixbit = "!\"#$%&'()*+,-012345689@ABCDEFGHIJKLMNPQRSTUVXYZ[`abcdefhijklmpqr";
     int ch, val, cnt, i, dlen, rlen;
     unsigned char header[20]; char *pt;

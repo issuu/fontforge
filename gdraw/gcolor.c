@@ -24,11 +24,12 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <ggadget.h>
-#include <gwidget.h>
 
-#include <string.h>
-#include <stdlib.h>
+#include <fontforge-config.h>
+
+#include "ggadget.h"
+#include "gwidget.h"
+
 #include <math.h>
 
 static GImage *ColorWheel(int width,int height) {
@@ -57,7 +58,7 @@ static GImage *ColorWheel(int width,int height) {
 	    if ( col.s>1.0 ) {
 		*row++ = 0xffffff;
 	    } else {
-		col.h = atan2(y,x)*180/3.1415926535897932;
+		col.h = atan2(y,x)*180/FF_PI;
 		if ( col.h < 0 ) col.h += 360;
 		gHSV2RGB(&col);
 		*row++ = COLOR_CREATE( (int) rint(255*col.r), (int) rint(255*col.g), (int) rint(255*col.b));
@@ -307,8 +308,8 @@ static int wheel_e_h(GWindow gw, GEvent *event) {
 	}
 	GDrawDrawImage(gw,d->wheel,NULL,0,0);
 	if ( d->col.hsv ) {
-	    double s = sin(d->col.h*3.1415926535897932/180.);
-	    double c = cos(d->col.h*3.1415926535897932/180.);
+	    double s = sin(d->col.h*FF_PI/180.);
+	    double c = cos(d->col.h*FF_PI/180.);
 	    int y = (int) rint(d->col.s*(size.height-1)*s/2.0) + size.height/2;
 	    int x = (int) rint(d->col.s*(size.width-1)*c/2.0) + size.width/2;
 	    circle.x = x-3; circle.y = y-3;

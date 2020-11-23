@@ -24,10 +24,20 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "tottfvar.h"
+
 #include "fontforge.h"
+#include "gfile.h"
+#include "mem.h"
+#include "splinesaveafm.h"
+#include "tottf.h"
 #include "ttf.h"
+#include "ustring.h"
+
 #include <math.h>
-#include <ustring.h>
 
 static int PtNumbersAreSet(SplineChar *sc) {
     struct splinecharlist *dep;
@@ -62,6 +72,8 @@ static int AssignPtNumbers(MMSet *mm,int gid) {
 	stillmore = false;
 	for ( i=0; i<=mm->instance_count; ++i )
 	    if ( ss[i]!=NULL ) stillmore = true;
+        free(ss);
+        free(sp);
 	if ( stillmore )
 return( false );
 return( true );
@@ -70,7 +82,11 @@ return( true );
 	for ( i=0; i<=mm->instance_count; ++i )
 	    if ( ss[i]==NULL ) stillmore = false;
 	if ( !stillmore )
+{
+free(ss);
+free(sp);
 return( false );
+}
     }
 	    
     for (;;) {
@@ -508,7 +524,7 @@ return;
     }
 
     tuple_size = 4+2*mm->axis_count;
-    at->cvar = tmpfile();
+    at->cvar = GFileTmpfile();
     putlong( at->cvar, 0x00010000 );	/* Format */
     putshort( at->cvar, cnt );		/* Number of instances with cvt tables (tuple count of interesting tuples) */
     putshort( at->cvar, 8+cnt*tuple_size );	/* Offset to data */
@@ -637,7 +653,7 @@ static void ttf_dumpgvar(struct alltabs *at, MMSet *mm) {
     int16 **deltas;
     int ptcnt;
 
-    at->gvar = tmpfile();
+    at->gvar = GFileTmpfile();
     putlong( at->gvar, 0x00010000 );	/* Format */
     putshort( at->gvar, mm->axis_count );
     putshort( at->gvar, mm->instance_count );	/* Number of global tuples */
@@ -710,7 +726,7 @@ static void ttf_dumpavar(struct alltabs *at, MMSet *mm) {
     if ( i==mm->axis_count )		/* We only have simple axes */
 return;					/* No need for a variation table */
 
-    at->avar = tmpfile();
+    at->avar = GFileTmpfile();
     putlong( at->avar, 0x00010000 );	/* Format */
     putlong( at->avar, mm->axis_count );
     for ( i=0; i<mm->axis_count; ++i ) {
@@ -767,7 +783,7 @@ return( on->strid );
 static void ttf_dumpfvar(struct alltabs *at, MMSet *mm) {
     int i,j;
 
-    at->fvar = tmpfile();
+    at->fvar = GFileTmpfile();
     putlong( at->fvar, 0x00010000 );	/* Format */
     putshort( at->fvar, 16 );		/* Offset to first axis data */
     putshort( at->fvar, 2 );		/* Size count pairs */

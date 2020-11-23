@@ -25,37 +25,20 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef FONTFORGE_FFPYTHON_H
+#define FONTFORGE_FFPYTHON_H
+
 #include "flaglist.h"
 
-/*********** PYTHON 3 **********/
-#if PY_MAJOR_VERSION >= 3
+#pragma push_macro("real")
+#undef real
+#define real py_real
 
-#define PyInt_Check    PyLong_Check
-#define PyInt_AsLong   PyLong_AsLong
-#define PyInt_FromLong PyLong_FromLong
+#include <Python.h>
+#include <structmember.h>
 
-#define ANYSTRING_CHECK(obj) (PyUnicode_Check(obj))
-#define STRING_CHECK   PyUnicode_Check
-#define STRING_TO_PY   PyUnicode_FromString
-#define DECODE_UTF8(s, size, errors) PyUnicode_DecodeUTF8(s, size, errors)
-#define PYBYTES_UTF8(str)            PyUnicode_AsUTF8String(str)
-#define STRING_FROM_FORMAT           PyUnicode_FromFormat
-
-#define PICKLE "pickle"
-
-#else /* PY_MAJOR_VERSION >= 3 */
-/*********** PYTHON 2 **********/
-
-#define ANYSTRING_CHECK(obj) ( PyUnicode_Check(obj) || PyString_Check(obj) )
-#define STRING_CHECK   PyBytes_Check
-#define STRING_TO_PY   PyBytes_FromString
-#define DECODE_UTF8(s, size, errors) PyString_Decode(s, size, "UTF-8", errors)
-#define PYBYTES_UTF8(str)            PyString_AsEncodedObject(str, "UTF-8", NULL)
-#define STRING_FROM_FORMAT           PyBytes_FromFormat
-
-#define PICKLE "cPickle"
-
-#endif /* PY_MAJOR_VERSION >= 3 */
+#undef real
+#pragma pop_macro("real")
 
 /*********** Common **********/
 #ifndef Py_TYPE
@@ -66,10 +49,6 @@
 #define Py_TYPENAME(ob) (((PyObject*)(ob))->ob_type->tp_name)
 #endif
 
-#if !defined( Py_RETURN_NONE )
-/* Not defined before 2.4 */
-# define Py_RETURN_NONE		return( Py_INCREF(Py_None), Py_None )
-#endif
 #define Py_RETURN(self)		return( Py_INCREF((PyObject *) (self)), (PyObject *) (self) )
 
 #ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
@@ -81,14 +60,12 @@
         PyObject_HEAD_INIT(type) size,
 #endif
 
-
-extern char* AnyPyString_to_UTF8( PyObject* );
-
 extern SplineChar *sc_active_in_ui;
 extern FontViewBase *fv_active_in_ui;
 extern int layer_active_in_ui;
 
 extern void FfPy_Replace_MenuItemStub(PyObject *(*func)(PyObject *,PyObject *));
+extern int PyFF_ConvexNibID(const char *);
 extern PyObject *PySC_From_SC(SplineChar *sc);
 extern PyObject *PyFV_From_FV(FontViewBase *fv);
 extern int FlagsFromTuple(PyObject *tuple,struct flaglist *flags,const char *flagkind);
@@ -106,9 +83,11 @@ extern void PyFF_Glyph_Set_Layer(SplineChar *sc,int layer);
 typedef struct ff_point {
     PyObject_HEAD
     /* Type-specific fields go here. */
-    float x,y;
+    double x,y;
     uint8 on_curve;
     uint8 selected;
+    uint8 type;
+    uint8 interpolated;
     char *name;
 } PyFF_Point;
 static PyTypeObject PyFF_PointType;
@@ -123,7 +102,7 @@ typedef struct ff_contour {
     int spiro_cnt;
     char *name;
 } PyFF_Contour;
-static PyTypeObject PyFF_ContourType;
+extern PyTypeObject PyFF_ContourType;
 
 typedef struct ff_layer {
     PyObject_HEAD
@@ -132,7 +111,7 @@ typedef struct ff_layer {
     struct ff_contour **contours;
     int is_quadratic;		/* bit flags, but access to int is faster */
 } PyFF_Layer;
-static PyTypeObject PyFF_LayerType;
+extern PyTypeObject PyFF_LayerType;
 
 typedef struct {
     PyObject_HEAD
@@ -236,14 +215,7 @@ static PyTypeObject PyFF_FontType;
 extern PyMethodDef PyFF_Font_methods[];
 extern PyMethodDef module_fontforge_methods[];
 
-PyObject *PyFV_From_FV_I(FontViewBase *fv);
+PyObject* PyFF_FontForFV(FontViewBase *fv);
+PyObject* PyFF_FontForFV_I(FontViewBase *fv);
 
-// return is really a CharView*
-typedef void* (*pyFF_maybeCallCVPreserveState_Func_t)( PyFF_Glyph *self );
-pyFF_maybeCallCVPreserveState_Func_t get_pyFF_maybeCallCVPreserveState_Func( void );
-void set_pyFF_maybeCallCVPreserveState_Func( pyFF_maybeCallCVPreserveState_Func_t f );
-
-typedef void (*pyFF_sendRedoIfInSession_Func_t)( void* cv );
-pyFF_sendRedoIfInSession_Func_t get_pyFF_sendRedoIfInSession_Func( void );
-void set_pyFF_sendRedoIfInSession_Func( pyFF_sendRedoIfInSession_Func_t f );
-
+#endif /* FONTFORGE_FFPYTHON_H */

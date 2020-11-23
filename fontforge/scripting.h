@@ -25,12 +25,17 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _SCRIPTING_H
-#define _SCRIPTING_H
+#ifndef FONTFORGE_SCRIPTING_H
+#define FONTFORGE_SCRIPTING_H
 
+#include <fontforge-config.h>
+
+#include "baseviews.h"
 #include "fontforgevw.h"
+
 #include <setjmp.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 /* If users want to write user defined scripting built-in functions they will */
 /*  need this file. The most relevant structure is the Context */
@@ -83,7 +88,6 @@ enum ce_type { /* (found->func)(&sub) context err codes */
 typedef struct context {
     struct context *caller;		/* The context of the script that called us */
     Array a;				/* The argument array */
-    Array **dontfree;			/* Irrelevant for user defined funcs */
     struct dictionary locals;		/* Irrelevant for user defined funcs */
     FILE *script;			/* Irrelevant for user defined funcs */
     unsigned int backedup: 1;		/* Irrelevant for user defined funcs */
@@ -107,6 +111,7 @@ typedef struct context {
     jmp_buf *err_env;			/* place to longjump to on an error */
 } Context;
 
+Array* arraynew(int sz);
 void arrayfree(Array *);
 
 void FontImage(SplineFont *sf,char *filename,Array *arr,int width,int height);
@@ -151,4 +156,13 @@ extern enum token_type ff_NextToken(Context *c);
 extern void ff_backuptok(Context *c);
 extern void ff_statement(Context*);
 
-#endif	/* _SCRIPTING_H */
+#ifndef _NO_FFSCRIPT
+extern void DictionaryFree(struct dictionary *dica);
+#endif
+
+extern char **GetFontNames(char *filename, int do_slow);
+extern void ProcessNativeScript(int argc, char *argv[], FILE *script);
+extern void CheckIsScript(int argc, char *argv[]);
+extern void ExecuteScriptFile(FontViewBase *fv, SplineChar *sc, char *filename);
+
+#endif /* FONTFORGE_SCRIPTING_H */

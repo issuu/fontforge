@@ -1,4 +1,36 @@
+/* Copyright (C) 2001-2012 by George Williams */
+/*
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+ * list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+ * this list of conditions and the following disclaimer in the documentation
+ * and/or other materials provided with the distribution.
+
+ * The name of the author may not be used to endorse or promote products
+ * derived from this software without specific prior written permission.
+
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <fontforge-config.h>
+
 #include "fontforge.h"		/* For LogError */
+#include "othersubrs.h"
+#include "splinefont.h"
+#include "ustring.h"
 
 /* These subroutines are code by Adobe for this exact use (from T1_Spec.pdf) */
 
@@ -445,10 +477,6 @@ const char *mmfindfont[] = {
 NULL
 };
 
-#include "splinefont.h"
-#include <string.h>
-#include <ustring.h>
-
 static const char **CopyLines(char **lines, int l,int is_copyright) {
     const char **ret;
     int i;
@@ -524,8 +552,19 @@ return( false );
     }
     fclose( os );
     /* we just read a copyright notice? That's no use */
-    if ( sub_num<=0 )
+    if ( sub_num<=0 ) {
+        if (co) {
+            for ( i=0; co[i]!=NULL; i++)
+                free((char*) co[i]);
+	    free(co);
+        }
+        if (lines) {
+            for ( i=0; i<l; i++)
+                free(lines[i]);
+	    free(lines);
+        }
 return( false );
+    }
     while ( sub_num<14 ) {
 	osubs[sub_num] = calloc(2,sizeof(char *));
 	osubs[sub_num][0] = copy("{}");
@@ -535,7 +574,11 @@ return( false );
     othersubrs_copyright[0] = co;
     for ( i=0; i<14; ++i )
 	othersubrs[i] = osubs[i];
-    free(lines);
+    if (lines) {
+        for ( i=0; i<l; i++)
+            free(lines[i]);
+        free(lines);
+    }
 return( true );
 }
 	

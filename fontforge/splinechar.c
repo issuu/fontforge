@@ -26,17 +26,33 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
+#include "dumppfa.h"
+#include "ffglib.h"
 #include "fontforgevw.h"
-#include <math.h>
+#include "fvfonts.h"
+#include "gresource.h"
+#include "lookups.h"
+#include "mem.h"
+#include "parsettf.h"
+#include "spiro.h"
+#include "splineorder2.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottf.h"
+#include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <locale.h>
-# include <ustring.h>
-# include <utype.h>
-# include <gresource.h>
+#include <math.h>
+
 #ifdef HAVE_IEEEFP_H
 # include <ieeefp.h>		/* Solaris defines isnan in ieeefp rather than math.h */
 #endif
-#include "ttf.h"
-#include "c-strtod.h"
 
 int adjustwidth = true;
 int adjustlbearing = true;
@@ -249,7 +265,7 @@ static int _SCRefNumberPoints2(SplineSet **_rss,SplineChar *sc,int pnum,int laye
 		rsp->nextcpindex = 0xffff;
 	    else
 		rsp->nextcpindex = pnum++;
-	    if ( sp->next==NULL )
+	    if ( sp->next==NULL || rsp->next==NULL )
 	break;
 	    sp = sp->next->to;
 	    rsp = rsp->next->to;
@@ -452,7 +468,7 @@ return;
 		(!sc->parent->layers[layer].background && SCWasEmpty(sc,layer)))) {
 	sc->widthset = false;
 	if ( sc->parent!=NULL && sc->width!=0 )
-	    sc->width = sc->parent->ascent+sc->parent->descent;
+	    sc->vwidth = sc->width = sc->parent->ascent+sc->parent->descent;
 	AnchorPointsFree(sc->anchor);
 	sc->anchor = NULL;
 	StemInfosFree(sc->hstem); sc->hstem = NULL;
@@ -1191,7 +1207,7 @@ static int CheckBluePair(char *blues, char *others, int bluefuzz,
 	    while ( *others==' ' ) ++others;
 	    if ( *others==']' || *others=='}' )
 	break;
-	    temp = c_strtod(others,&end);
+	    temp = g_ascii_strtod(others,&end);
 	    if ( temp!=rint(temp))
 		err |= pds_notintegral;
 	    else if ( end==others ) {
@@ -1215,7 +1231,7 @@ static int CheckBluePair(char *blues, char *others, int bluefuzz,
 	while ( *blues==' ' ) ++blues;
 	if ( *blues==']' || *blues=='}' )
     break;
-	temp = c_strtod(blues,&end);
+	temp = g_ascii_strtod(blues,&end);
 	if ( temp!=rint(temp))
 	    err |= pds_notintegral;
 	else if ( end==blues ) {
@@ -1263,7 +1279,7 @@ return( true );
 return( false );
     ++str_val;
 
-    val = c_strtod(str_val,&end);
+    val = g_ascii_strtod(str_val,&end);
     while ( *end==' ' ) ++end;
     if ( *end!=']' && *end!='}' )
 return( false );
@@ -1285,7 +1301,7 @@ static int CheckStemSnap(struct psdict *dict,char *snapkey, char *stdkey ) {
     if ( (str_val = PSDictHasEntry(dict,stdkey))!=NULL ) {
 	while ( *str_val==' ' ) ++str_val;
 	if ( *str_val=='[' && *str_val!='{' ) ++str_val;
-	std_val = c_strtod(str_val,&end);
+	std_val = g_ascii_strtod(str_val,&end);
     }
 
     if ( (str_val = PSDictHasEntry(dict,snapkey))==NULL )
@@ -1300,7 +1316,7 @@ return( false );
 	while ( *str_val==' ' ) ++str_val;
 	if ( *str_val==']' && *str_val!='}' )
     break;
-	temp = c_strtod(str_val,&end);
+	temp = g_ascii_strtod(str_val,&end);
 	if ( end==str_val )
 return( false );
 	str_val = end;
@@ -1335,7 +1351,7 @@ return( pds_missingblue );
     }
 
     if ( (test=PSDictHasEntry(sf->private,"BlueScale"))!=NULL ) {
-	bluescale = c_strtod(test,&end);
+	bluescale = g_ascii_strtod(test,&end);
 	if ( *end!='\0' || end==test || bluescale<0 )
 	    errs |= pds_badbluescale;
     }
@@ -1475,14 +1491,14 @@ StemInfo *SCHintOverlapInMask(SplineChar *sc,HintMask *hm) {
 			    end1 = start1+h1->width;
 			} else {
 			    end1 = h1->start;
-			    start1 = start1+h1->width;
+			    start1 = end1+h1->width;
 			}
 			if ( h2->width>0 ) {
 			    start2 = h2->start;
 			    end2 = start2+h2->width;
 			} else {
 			    end2 = h2->start;
-			    start2 = start2+h2->width;
+			    start2 = end2+h2->width;
 			}
 			if ( end1<start2 || start1>end2 )
 			    /* No overlap */;
@@ -1864,6 +1880,8 @@ return( vs_maskttf );
 return( vs_maskps );
     else if ( format==ff_svg )
 return( vs_maskttf );
+    else if ( format==ff_woff2 )
+return( vs_maskttf );
     else
 return( sf->subfontcnt!=0 || sf->cidmaster!=NULL ? vs_maskcid :
 	sf->layers[layer].order2 ? vs_maskttf : vs_maskps );
@@ -1905,8 +1923,6 @@ static SplineSet *UnitCircle(int clockwise) {
 	SplineSetReverse(spl);
 return( spl );
 }
-
-#define PI	3.1415926535897932
 
 static int CutCircle(SplineSet *spl,BasePoint *me,int first) {
     Spline *s, *firsts;
@@ -2126,7 +2142,7 @@ static int MakeEllipseWithAxis(CharViewBase *cv,SplinePoint *sp1,SplinePoint *sp
     clockwise = EllipseClockwise(sp1,sp2,&slope1,&slope2);
     dot = slope1.y*slope2.x - slope1.x*slope2.y;
     theta = atan2(-slope1.x,slope1.y);
-    if ( !finite(theta))
+    if ( !isfinite(theta))
 return( false );
     c = cos(theta); s = sin(theta);
     if ( RealNear(dot,0) ) {
@@ -2135,7 +2151,7 @@ return( false );
 	if ( slope1.x*slope2.x + slope1.y*slope2.y > 0 )
 return( false );		/* Point in different directions */
 	temp.x = sp2->me.x - sp1->me.x;
-	temp.y = sp2->me.y - sp2->me.y;
+	temp.y = sp2->me.y - sp1->me.y;
 	if ( !RealNear(slope1.x*temp.x - slope1.y*temp.y,0) )
 return( false );
 	center.x = sp1->me.x + temp.x/2;
@@ -2205,7 +2221,7 @@ static int EllipseSomewhere(CharViewBase *cv,SplinePoint *sp1,SplinePoint *sp2,
 	BasePoint slope1, slope2;
     } centered, rot;
     bigreal bestrot=9999, bestrtest = 1e50, e1sq, e2sq, r1, r2, rtest;
-    bigreal low, high, offset=PI/128., rotation;
+    bigreal low, high, offset=FF_PI/128., rotation;
     int i;
     int clockwise;
     /* First figure out a center. There will be one: */
@@ -2254,7 +2270,7 @@ return( false );
     r1 = r2 = 1;
     for ( i=0; i<ITER; ++i ) {
 	if ( i==0 ) {
-	    low = 0; high = PI; offset = PI/1024;
+	    low = 0; high = FF_PI; offset = FF_PI/1024;
 	} else {
 	    low = bestrot-offset; high = bestrot+offset; offset /= 64.;
 	}

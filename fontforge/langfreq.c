@@ -1,28 +1,50 @@
 /* -*- coding: utf-8 -*- */
+/* Copyright (C) 2007-2012 by George Williams */
+/*
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <basics.h>
-#include <ustring.h>
-#include <utype.h>
+ * Redistributions of source code must retain the above copyright notice, this
+ * list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+ * this list of conditions and the following disclaimer in the documentation
+ * and/or other materials provided with the distribution.
+
+ * The name of the author may not be used to endorse or promote products
+ * derived from this software without specific prior written permission.
+
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <fontforge-config.h>
+
+#include "basics.h"
+#include "ffglib.h"
+#include "fvfonts.h"
+#include "intl.h"
+#include "langfreq.h"
 #include "splinefont.h"
-#include <intl.h>
-
-#include <glib.h>
+#include "splinesaveafm.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
 
 #define ISOL	0
 #define INIT	1
 #define MEDI	2
 #define FINA	3
 
-struct letter_frequencies {
-    const char *utf8_letter;
-    float frequency[4];
-    float *afters;
-};
-
 #define LETTER_FREQUENCIES_EMPTY { NULL, { 0, 0, 0, 0 }, NULL }
-
 
 /* This is over many languages, used when we have no specific info */
 static float word_lengths[] = {
@@ -1818,7 +1840,7 @@ static float WEL_vowel_run[] = {
     0.000000, 0.716191, 0.249052, 0.031673, 0.002959, 0.000125, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
 };
 
-static struct lang_frequencies { uint32 script, lang; char *note; struct letter_frequencies *cnts; float *wordlens; char *vowels; float *consonant_run, *all_consonants, *vowel_run; } lang_frequencies[] = {
+static struct lang_frequencies lang_frequencies[] = {
     { CHR('l','a','t','n'), CHR('C','S','Y',' '), N_("Czech"),     CSY_counts, CSY_word_lens, "aeiouyráéíóúýěů", CSY_consonant_run, CSY_all_consonants, CSY_vowel_run },
     { CHR('l','a','t','n'), CHR('N','L','D',' '), N_("Dutch"),     NLD_counts, NLD_word_lens, "aeiouyàéêëïòó", NLD_consonant_run, NLD_all_consonants, NLD_vowel_run },
     { CHR('l','a','t','n'), CHR('E','N','G',' '), N_("English"),   ENG_counts, ENG_word_lens, "aeiouy", ENG_consonant_run, ENG_all_consonants, ENG_vowel_run },

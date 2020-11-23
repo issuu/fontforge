@@ -14,11 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program; if not, see <http://www.gnu.org/licenses/>.
 
+#include <fontforge-config.h>
+
+#include "ffglib.h"
 #include "gio.h"
 #include "gfile.h"
 #include "ustring.h"
-#include <gio/gio.h>
-#include <glib.h>
 
 const char *MimeListFromExt[] = {
 /* This list is indexed from list ExtToMimeList */
@@ -46,15 +47,16 @@ const char *MimeListFromExt[] = {
 	/* vnd.font-fontforge-sfd Officially registered with IANA on 14 May 2008 */
 	/*21 .sfd */	"application/vnd.font-fontforge-sfd",
 	/*22 .pdf */	"application/pdf",
-	/*23 .ttf */	"application/x-font-ttf",
-	/*24 .otf */	"application/x-font-otf",
+	/*23 .ttf */	"font/ttf",
+	/*24 .otf */	"font/otf",
 	/*25 ,cid */	"application/x-font-cid",
 	/*26 .pcf */	"application/x-font-pcf",
 	/*27 .snf */	"application/x-font-snf",
 	/*28 .bdf */	"application/x-font-bdf",
-	/*29 .woff */	"application/x-font-woff",
+	/*29 .woff */	"font/woff",
 	/*30 .dfont */	"application/x-mac-dfont",
-	/*31 .ffil */	"application/x-mac-suit"
+	/*31 .ffil */	"application/x-mac-suit",
+	/*32 .woff2 */	"font/woff2"
 };
 
 typedef struct {
@@ -96,6 +98,7 @@ const ext3mime ExtToMimeList[] = {
     {".woff", 29},
     {".dfont", 30},
     {".ffil", 31},
+    {".woff2", 32},
     {0, 0}
 };
 
@@ -133,8 +136,9 @@ char* GIOGetMimeType(const char *path) {
 	guchar sniff_buffer[sniff_length];
 	gboolean uncertain;
 	size_t res=fread(sniff_buffer,1,sniff_length,fp);
+	int err=ferror(fp);
 	fclose (fp);
-	if ( res>=0 ) {
+	if ( !err && res>0 ) {
 	    // first force guessing file type from the content only by passing
 	    // NULL for file name, if the result is not certain try again with
 	    // file name

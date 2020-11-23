@@ -24,13 +24,30 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autohint.h"
+#include "cvundoes.h"
+#include "dumppfa.h"
 #include "fontforgevw.h"
-#include <ustring.h>
-#include <utype.h>
-#include <gkeysym.h>
+#include "fvcomposite.h"
+#include "fvfonts.h"
+#include "lookups.h"
+#include "namelist.h"
+#include "scstyles.h"
+#include "splineorder2.h"
+#include "splineoverlap.h"
+#include "splinestroke.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "stemdb.h"
+#include "tottfgpos.h"
+#include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
-#include <ttf.h>
-#include <stemdb.h>
 
 static unichar_t lc_stem_str[] = { 'l', 'l', 'l', 'm', 'f', 't', 0x438, 0x43D,
 	0x43f, 0x448, 0x3b9, 0 };
@@ -1548,7 +1565,7 @@ return;
 	AlignPointPair( stem,stem->keypts[1],stem->keypts[3],hscale,vscale );
 }
 
-static void ChangeGlyph( SplineChar *sc_sc, SplineChar *orig_sc, int layer, struct genericchange *genchange ) {
+void ChangeGlyph( SplineChar *sc_sc, SplineChar *orig_sc, int layer, struct genericchange *genchange ) {
     real scale[6];
     DBounds orig_b, new_b;
     int i, dcnt = 0, removeoverlap = true;
@@ -1583,19 +1600,17 @@ static void ChangeGlyph( SplineChar *sc_sc, SplineChar *orig_sc, int layer, stru
 	    scale[3] = 1.;
 	}
 	SplinePointListTransform( sc_sc->layers[layer].splines,scale,tpt_AllPoints );
-
-	memset( &si,0,sizeof( si ));
-	si.stroke_type = si_std;
-	si.join = lj_miter;
-	si.cap = lc_square;
+	InitializeStrokeInfo(&si);
+	si.stroke_type = si_round;
+	SITranslatePSArgs(&si, lj_miter, lc_square);
+	si.rmov = srmov_contour;
 	if ( add >=0 ) {
-	    si.radius = add/2.;
+	    si.width = add;
 	    si.removeinternal = true;
 	} else {
-	    si.radius = -add/2.;
+	    si.width = -add;
 	    si.removeexternal = true;
 	}
-	/*si.removeoverlapifneeded = false;*/
 
 	temp = BoldSSStroke( sc_sc->layers[layer].splines,&si,sc_sc->layers[layer].order2,removeoverlap );
 	SplinePointListsFree( sc_sc->layers[layer].splines );
@@ -1879,7 +1894,7 @@ void SmallCapsFindConstants(struct smallcaps *small, SplineFont *sf,
     memset(small,0,sizeof(*small));
 
     small->sf = sf; small->layer = layer;
-    small->italic_angle = sf->italicangle * 3.1415926535897932/180.0;
+    small->italic_angle = sf->italicangle * FF_PI/180.0;
     small->tan_ia = tan( small->italic_angle );
 
     small->lc_stem_width = CaseMajorVerticalStemWidth(sf, layer,lc_stem_str, small->tan_ia );
@@ -2731,7 +2746,7 @@ return;
 		if ( achar==NULL )
 		    achar = sc_sc;
 		if ( SFGetAlternate(sf,sc->unicodeenc,sc,false)!=NULL )
-		    SCBuildComposit(sf,sc_sc,fv->active_layer,NULL,true);
+		    SCBuildComposit(sf,sc_sc,fv->active_layer,NULL,true,false);
 		if ( sc_sc->layers[fv->active_layer].refs==NULL ) {
 		    RefChar *rlast = NULL;
 		    for ( ref=sc->layers[fv->active_layer].refs; ref!=NULL; ref=ref->next ) {
@@ -2963,7 +2978,7 @@ return;
 	    /*  than I'm going to do here... */
 	    if ( sc->layers[fv->active_layer].splines==NULL &&
 		    SFGetAlternate(sf,sc->unicodeenc,sc,false)!=NULL )
-		SCBuildComposit(sf,sc_sc,fv->active_layer,NULL,true);
+		SCBuildComposit(sf,sc_sc,fv->active_layer,NULL,true,false);
 	    if ( sc_sc->layers[fv->active_layer].refs==NULL ) {
 		RefChar *rlast = NULL;
 		for ( ref=sc->layers[fv->active_layer].refs; ref!=NULL; ref=ref->next ) {
@@ -3395,7 +3410,7 @@ void SCCondenseExtend(struct counterinfo *ci,SplineChar *sc, int layer,
     if ( ci->correct_italic && sc->parent->italicangle!=0 ) {
 	memset(transform,0,sizeof(transform));
 	transform[0] = transform[3] = 1;
-	transform[2] = tan( sc->parent->italicangle * 3.1415926535897932/180.0 );
+	transform[2] = tan( sc->parent->italicangle * FF_PI/180.0 );
 	SplinePointListTransform(sc->layers[layer].splines,transform,tpt_AllPoints);
 	StemInfosFree(sc->vstem); sc->vstem=NULL;
     }
@@ -3445,7 +3460,7 @@ void SCCondenseExtend(struct counterinfo *ci,SplineChar *sc, int layer,
 	/* If we unskewed it, we want to skew it now */
 	memset(transform,0,sizeof(transform));
 	transform[0] = transform[3] = 1;
-	transform[2] = -tan( sc->parent->italicangle * 3.1415926535897932/180.0 );
+	transform[2] = -tan( sc->parent->italicangle * FF_PI/180.0 );
 	SplinePointListTransform(sc->layers[layer].splines,transform,tpt_AllPoints);
     }
 
@@ -4020,18 +4035,17 @@ static void SCEmbolden(SplineChar *sc, struct lcg_zones *zones, int layer) {
     DBounds old, new;
     int adjust_counters;
 
-    memset(&si,0,sizeof(si));
-    si.stroke_type = si_std;
-    si.join = lj_miter;
-    si.cap = lc_square;
+    InitializeStrokeInfo(&si);
+    si.stroke_type = si_round;
+    SITranslatePSArgs(&si, lj_miter, lc_square);
+    si.rmov = srmov_contour;
     if ( zones->stroke_width>=0 ) {
-	si.radius = zones->stroke_width/2.;
+	si.width = zones->stroke_width;
 	si.removeinternal = true;
     } else {
-	si.radius = -zones->stroke_width/2.;
+	si.width = -zones->stroke_width;
 	si.removeexternal = true;
     }
-    /*si.removeoverlapifneeded = false;*/
 
     if ( layer!=ly_back && zones->wants_hints &&
 	    sc->hstem == NULL && sc->vstem==NULL && sc->dstem==NULL ) {
@@ -4387,7 +4401,7 @@ return( cs_neither );
     under = strchr(sc->name,'_');
     dot   = strchr(sc->name,'.');
     if ( dot!=NULL )
-	smallcaps = strcmp(dot,".sc")==0 || strcmp(dot,".small");
+	smallcaps = strcmp(dot,".sc")==0 || strcmp(dot,".small")==0;
     if ( under!=NULL && (dot==NULL || dot>under))
 	dot = under;
     if ( dot==NULL )
@@ -6767,7 +6781,7 @@ static void InitItalicConstants(SplineFont *sf, int layer, ItalicInfo *ii) {
     int i,cnt;
     double val;
 
-    ii->tan_ia = tan(ii->italic_angle * 3.1415926535897932/180.0 );
+    ii->tan_ia = tan(ii->italic_angle * FF_PI/180.0 );
 
     ii->x_height	  = SFXHeight  (sf,layer,false);
     ii->ascender_height   = SFAscender (sf,layer,false);
@@ -6896,7 +6910,7 @@ static void SCChangeXHeight(SplineChar *sc,int layer,struct xheightinfo *xi) {
     if ( sc->layers[layer].refs!=NULL &&
 			((alts = SFGetAlternate(sc->parent,sc->unicodeenc,sc,true))!=NULL &&
 			 alts[1]!=0 ))
-	SCBuildComposit(sc->parent,sc,layer,NULL,true);
+	SCBuildComposit(sc->parent,sc,layer,NULL,true,false);
     else {
 	SCPreserveLayer(sc,layer,true);
 	_SCChangeXHeight(sc,layer,xi);

@@ -24,20 +24,41 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "splineutil.h"
+
+#include "cvundoes.h"
+#include "dumppfa.h"
+#include "encoding.h"
+#include "ffglib.h"
 #include "fontforgevw.h"
-#include <math.h>
+#include "fvfonts.h"
+#include "fvimportbdf.h"
+#include "glif_name_hash.h"
+#include "mm.h"
+#include "namelist.h"
+#include "parsepfa.h"
+#include "parsettf.h"
 #include "psfont.h"
+#include "psread.h"
+#include "sfd1.h" // This has the extended SplineFont type SplineFont1 for old file versions.
+#include "spiro.h"
+#include "splinefill.h"
+#include "splineorder2.h"
+#include "splinerefigure.h"
+#include "splineutil2.h"
+#include "tottf.h"
 #include "ustring.h"
 #include "utype.h"
 #include "views.h"		/* for FindSel structure */
+
+#include <locale.h>
+
+#include <math.h>
 #ifdef HAVE_IEEEFP_H
 # include <ieeefp.h>		/* Solaris defines isnan in ieeefp rather than math.h */
-#endif
-#include <locale.h>
-#include "sfd1.h" // This has the extended SplineFont type SplineFont1 for old file versions.
-#include "c-strtod.h"
-#ifdef FF_UTHASH_GLIF_NAMES
-# include "glif_name_hash.h"
 #endif
 
 /*#define DEBUG 1*/
@@ -735,7 +756,7 @@ void SplineCharFindBounds(SplineChar *sc,DBounds *bounds) {
     bounds->miny = bounds->maxy = 0;
 
     first = last = ly_fore;
-    if ( sc->parent!=NULL && sc->parent->multilayer )
+    if ( sc->parent!=NULL )
 	last = sc->layer_cnt-1;
     for ( i=first; i<=last; ++i )
 	_SplineCharLayerFindBounds(sc,i,bounds);
@@ -1047,19 +1068,19 @@ void SplineFontQuickConservativeBounds(SplineFont *sf,DBounds *b) {
     if ( b->maxy<-65536 ) b->maxy = 0;
 }
 
-void SplinePointCategorize(SplinePoint *sp) {
-    int oldpointtype = sp->pointtype;
+static int SplinePointCategory(SplinePoint *sp) {
+    enum pointtype pt;
 
-    sp->pointtype = pt_corner;
+    pt = pt_corner;
     if ( sp->next==NULL && sp->prev==NULL )
 	;
     else if ( (sp->next!=NULL && sp->next->to->me.x==sp->me.x && sp->next->to->me.y==sp->me.y) ||
 	    (sp->prev!=NULL && sp->prev->from->me.x==sp->me.x && sp->prev->from->me.y==sp->me.y ))
 	;
     else if ( sp->next==NULL ) {
-	sp->pointtype = sp->noprevcp ? pt_corner : pt_curve;
+	pt = sp->noprevcp ? pt_corner : pt_curve;
     } else if ( sp->prev==NULL ) {
-	sp->pointtype = sp->nonextcp ? pt_corner : pt_curve;
+	pt = sp->nonextcp ? pt_corner : pt_curve;
     } else if ( sp->nonextcp && sp->noprevcp ) {
 	;
     } else {
@@ -1091,7 +1112,7 @@ void SplinePointCategorize(SplinePoint *sp) {
 	/*  result is less than 1 em-unit then we've got colinear control points */
 	/*  (within the resolution of the integer grid) */
 	/* Not quite... they could point in the same direction */
-        if ( oldpointtype==pt_curve )
+        if ( sp->pointtype==pt_curve )
             bounds = 4.0;
         else
             bounds = 1.0;
@@ -1099,73 +1120,115 @@ void SplinePointCategorize(SplinePoint *sp) {
 		((nclen>=pclen && (cross = pcdir.x*ncunit.y - pcdir.y*ncunit.x)<bounds && cross>-bounds ) ||
 		 (pclen>nclen && (cross = ncdir.x*pcunit.y - ncdir.y*pcunit.x)<bounds && cross>-bounds )) &&
 		 ncdir.x*pcdir.x + ncdir.y*pcdir.y < 0 )
-	    sp->pointtype = pt_curve;
+	    pt = pt_curve;
 	/* Cross product of control point with unit vector normal to line in */
 	/*  opposite direction should be less than an em-unit for a tangent */
-	else if (( nclen==0 && pclen!=0 && (cross = pcdir.x*ndir.y-pcdir.y*ndir.x)<bounds && cross>-bounds ) ||
-		( pclen==0 && nclen!=0 && (cross = ncdir.x*pdir.y-ncdir.y*pdir.x)<bounds && cross>-bounds ))
-	    sp->pointtype = pt_tangent;
+	else if (    (   nclen==0 && pclen!=0
+	              && (cross = pcdir.x*ndir.y-pcdir.y*ndir.x)<bounds
+	              && cross>-bounds && (pcdir.x*ndir.x+pcdir.y*ndir.y)<0 )
+	          ||
+	             (   pclen==0 && nclen!=0
+	              && (cross = ncdir.x*pdir.y-ncdir.y*pdir.x)<bounds
+	              && cross>-bounds && (ncdir.x*pdir.x+ncdir.y*pdir.y)<0 ) )
+	    pt = pt_tangent;
 
-	/* If a point started out hv, and could still be hv, them make it so */
-	/*  but don't make hv points de novo, Alexey doesn't like change */
-	/*  (this only works because hv isn't a default setting, so if it's */
-	/*   there it was done intentionally) */
-	if ( sp->pointtype == pt_curve && oldpointtype == pt_hvcurve &&
+	if (pt == pt_curve &&
 		((sp->nextcp.x==sp->me.x && sp->prevcp.x==sp->me.x && sp->nextcp.y!=sp->me.y) ||
 		 (sp->nextcp.y==sp->me.y && sp->prevcp.y==sp->me.y && sp->nextcp.x!=sp->me.x)))
-	    sp->pointtype = pt_hvcurve;
+	    pt = pt_hvcurve;
     }
+    return pt;
 }
 
 int SplinePointIsACorner(SplinePoint *sp) {
-    enum pointtype old = sp->pointtype, new;
+	return SplinePointCategory(sp) == pt_corner;
+}
 
-    SplinePointCategorize(sp);
-    new = sp->pointtype;
-    sp->pointtype = old;
-return( new==pt_corner );
+static enum pointtype SplinePointDowngrade(int current, int geom) {
+	enum pointtype np = current;
+
+	if ( current==pt_curve && geom!=pt_curve ) {
+		if ( geom==pt_hvcurve )
+			np = pt_curve;
+		else
+			np = pt_corner;
+	} else if ( current==pt_hvcurve && geom!=pt_hvcurve ) {
+		if ( geom==pt_curve )
+			np = pt_curve;
+		else
+			np = pt_corner;
+	} else if ( current==pt_tangent && geom!=pt_tangent ) {
+		np = pt_corner;
+	}
+
+	return np;
+}
+
+// Assumes flag combinations are already verified. Only returns false
+// when called with check_compat
+int _SplinePointCategorize(SplinePoint *sp, int flags) {
+	enum pointtype geom, dg, cur;
+
+	if ( flags & pconvert_flag_none )
+		// No points selected for conversion -- keep type as is
+		return true;
+	if ( flags & pconvert_flag_smooth && sp->pointtype == pt_corner )
+		// Convert only "smooth" points, not corners
+		return true;
+
+	geom = SplinePointCategory(sp);
+	dg = SplinePointDowngrade(sp->pointtype, geom);
+
+	if ( flags & pconvert_flag_incompat && sp->pointtype == dg )
+		// Only convert points incompatible with current type
+		return true;
+
+	if ( flags & pconvert_flag_by_geom ) {
+		if ( ! ( flags & pconvert_flag_hvcurve ) && geom == pt_hvcurve )
+			sp->pointtype = pt_curve;
+		else
+			sp->pointtype = geom;
+	} else if ( flags & pconvert_flag_downgrade ) {
+		sp->pointtype = dg;
+	} else if ( flags & pconvert_flag_force_type ) {
+		if ( sp->pointtype != dg ) {
+			cur = sp->pointtype;
+			sp->pointtype = dg;
+			SPChangePointType(sp,cur);
+		}
+	} else if ( flags & pconvert_flag_check_compat ) {
+		if ( sp->pointtype != dg )
+			return false;
+	}
+	return true;
+}
+
+void SplinePointCategorize(SplinePoint *sp) {
+	_SplinePointCategorize(sp, pconvert_flag_all|pconvert_flag_by_geom);
+}
+
+// _SplinePointCategorize only returns false when called with check_compat flag,
+// in which case no point values are altered and the "early" return will not leave
+// splines partially adjusted.
+int _SPLCategorizePoints(SplinePointList *spl, int flags) {
+    Spline *spline, *first, *last=NULL;
+    int ok = true;
+
+    for ( ; spl!=NULL; spl = spl->next ) {
+	first = NULL;
+	for ( spline = spl->first->next; spline!=NULL && spline!=first && ok; spline=spline->to->next ) {
+	    ok = _SplinePointCategorize(spline->from, flags);
+	    last = spline;
+	    if ( first==NULL ) first = spline;
+	}
+	if ( spline==NULL && last!=NULL && ok )
+	    _SplinePointCategorize(last->to, flags);
+    }
+    return ok;
 }
 
 void SPLCategorizePoints(SplinePointList *spl) {
-    Spline *spline, *first, *last=NULL;
-
-    for ( ; spl!=NULL; spl = spl->next ) {
-	first = NULL;
-	for ( spline = spl->first->next; spline!=NULL && spline!=first; spline=spline->to->next ) {
-	    SplinePointCategorize(spline->from);
-	    last = spline;
-	    if ( first==NULL ) first = spline;
-	}
-	if ( spline==NULL && last!=NULL )
-	    SplinePointCategorize(last->to);
-    }
-}
-
-void SPLCategorizePointsKeepCorners(SplinePointList *spl) {
-    // It's important when round-tripping U. F. O. data that we keep corners as corners and non-corners as non-corners.
-    Spline *spline, *first, *last=NULL;
-    int old_type;
-
-    for ( ; spl!=NULL; spl = spl->next ) {
-	first = NULL;
-	for ( spline = spl->first->next; spline!=NULL && spline!=first; spline=spline->to->next ) {
-	    // If it is a corner, we leave it as a corner.
-	    if ((old_type = spline->from->pointtype) != pt_corner) {
-	      SplinePointCategorize(spline->from);
-	      // If it was not a corner, we do not let it change to a corner.
-	      if (spline->from->pointtype == pt_corner) spline->from->pointtype = old_type;
-	    }
-	    last = spline;
-	    if ( first==NULL ) first = spline;
-	}
-	if ( spline==NULL && last!=NULL )
-	    // If it is a corner, we leave it as a corner.
-	    if ((old_type = last->to->pointtype) != pt_corner) {
-	      SplinePointCategorize(last->to);
-	      // If it was not a corner, we do not let it change to a corner.
-	      if (last->to->pointtype == pt_corner) last->to->pointtype = old_type;
-	    }
-    }
+	_SPLCategorizePoints(spl, pconvert_flag_all|pconvert_flag_by_geom);
 }
 
 void SCCategorizePoints(SplineChar *sc) {
@@ -1388,6 +1451,42 @@ static SplinePointList *SplinePointListCopySpiroSelected1(SplinePointList *spl) 
 return( head );
 }
 
+bool SplinePointListCheckSelected1(const SplinePointList *base, bool spiro, bool *allsel, bool skip_spiro_end) {
+    bool anysel = false;
+    if (allsel) {
+        *allsel = true;
+    }
+    if (spiro) {
+        for (int i = 0; i < base->spiro_cnt-(skip_spiro_end?1:0); ++i) {
+            if (SPIRO_SELECTED(&base->spiros[i])) {
+                anysel = true;
+                if (!allsel) {
+                    return anysel;
+                }
+            } else if (allsel) {
+                *allsel = false;
+            }
+        }
+    } else {
+        SplinePoint *first = NULL, *pt;
+        for (pt = base->first; pt != NULL && pt != first; pt = pt->next->to) {
+            if (pt->selected) {
+                anysel = true;
+                if (!allsel) {
+                    return anysel;
+                }
+            } else if (allsel) {
+                *allsel = false;
+            }
+            if (first == NULL)
+                first = pt;
+            if (pt->next == NULL)
+                break;
+        }
+    }
+    return anysel;
+}
+
 SplinePointList *SplinePointListCopy(const SplinePointList *base) {
     SplinePointList *head=NULL, *last=NULL, *cur;
 
@@ -1405,18 +1504,10 @@ return( head );
 SplinePointList *SplinePointListCopySelected(SplinePointList *base) {
     SplinePointList *head=NULL, *last=NULL, *cur=NULL;
     SplinePoint *pt, *first;
-    int anysel, allsel;
+    bool anysel, allsel;
 
     for ( ; base!=NULL; base = base->next ) {
-	anysel = false; allsel = true;
-	first = NULL;
-	for ( pt=base->first; pt!=NULL && pt!=first; pt = pt->next->to ) {
-	    if ( pt->selected ) anysel = true;
-	    else allsel = false;
-	    if ( first==NULL ) first = pt;
-	    if ( pt->next==NULL )
-	break;
-	}
+	anysel = SplinePointListCheckSelected1(base, false, &allsel, false);
 	if ( allsel )
 	    cur = SplinePointListCopy1(base);
 	else if ( anysel )
@@ -1434,17 +1525,11 @@ return( head );
 
 SplinePointList *SplinePointListCopySpiroSelected(SplinePointList *base) {
     SplinePointList *head=NULL, *last=NULL, *cur=NULL;
-    int anysel, allsel;
+    bool anysel, allsel;
     int i;
 
     for ( ; base!=NULL; base = base->next ) {
-	anysel = false; allsel = true;
-	for ( i=0; i<base->spiro_cnt-1; ++i ) {
-	    if ( SPIRO_SELECTED(&base->spiros[i]) )
-		anysel = true;
-	    else
-		allsel = false;
-	}
+	anysel = SplinePointListCheckSelected1(base, true, &allsel, true);
 	if ( allsel )
 	    cur = SplinePointListCopy1(base);
 	else if ( anysel )
@@ -1572,29 +1657,11 @@ return( last );
 SplinePointList *SplinePointListRemoveSelected(SplineChar *sc,SplinePointList *base) {
     SplinePointList *head=NULL, *last=NULL, *next;
     SplinePoint *pt, *first;
-    int anysel, allsel;
+    bool anysel, allsel;
 
     for ( ; base!=NULL; base = next ) {
 	next = base->next;
-	anysel = false; allsel = true;
-	if ( !sc->inspiro || !hasspiro()) {
-	    first = NULL;
-	    for ( pt=base->first; pt!=NULL && pt!=first; pt = pt->next->to ) {
-		if ( pt->selected ) anysel = true;
-		else allsel = false;
-		if ( first==NULL ) first = pt;
-		if ( pt->next==NULL )
-	    break;
-	    }
-	} else {
-	    int i;
-	    for ( i=0; i<base->spiro_cnt; ++i ) {
-		if ( SPIRO_SELECTED(&base->spiros[i]) )
-		    anysel = true;
-		else
-		    allsel = false;
-	    }
-	}
+	anysel = SplinePointListCheckSelected1(base, sc->inspiro && hasspiro(), &allsel, false);
 	if ( allsel ) {
 	    SplinePointListMDFree(sc,base);
     continue;
@@ -1669,12 +1736,21 @@ ImageList *ImageListTransform(ImageList *img, real transform[6],int everything) 
 return( head );
 }
 
-void BpTransform(BasePoint *to, BasePoint *from, real transform[6]) {
+static void _BpTransform(BasePoint *to, BasePoint *from, real transform[6], enum transformPointMask tpmask) {
     BasePoint p;
     p.x = transform[0]*from->x + transform[2]*from->y + transform[4];
     p.y = transform[1]*from->x + transform[3]*from->y + transform[5];
-    to->x = rint(1024*p.x)/1024;
-    to->y = rint(1024*p.y)/1024;
+    if ( ! (tpmask & tpmask_dontTrimValues ) ) {
+	to->x = rint(1024*p.x)/1024;
+	to->y = rint(1024*p.y)/1024;
+    } else {
+	to->x = p.x;
+	to->y = p.y;
+    }
+}
+
+void BpTransform(BasePoint *to, BasePoint *from, real transform[6]) {
+    _BpTransform(to, from, transform, 0);
 }
 
 void ApTransform(AnchorPoint *ap, real transform[6]) {
@@ -1693,13 +1769,13 @@ static void TransformPointExtended(SplinePoint *sp, real transform[6], enum tran
 	if( sp->nextcpselected )
 	{
 	    int order2 = sp->next ? sp->next->order2 : 0;
-	    BpTransform(&sp->nextcp,&sp->nextcp,transform);
+	    _BpTransform(&sp->nextcp,&sp->nextcp,transform,tpmask);
 	    SPTouchControl( sp, &sp->nextcp, order2 );
 	}
 	else if( sp->prevcpselected )
 	{
 	    int order2 = sp->next ? sp->next->order2 : 0;
-	    BpTransform(&sp->prevcp,&sp->prevcp,transform);
+	    _BpTransform(&sp->prevcp,&sp->prevcp,transform,tpmask);
 	    SPTouchControl( sp, &sp->prevcp, order2 );
 	}
     }
@@ -1708,11 +1784,11 @@ static void TransformPointExtended(SplinePoint *sp, real transform[6], enum tran
 	/**
 	 * Transform the base splinepoints.
 	 */
-	BpTransform(&sp->me,&sp->me,transform);
+	_BpTransform(&sp->me,&sp->me,transform,tpmask);
 
 	if ( !sp->nonextcp )
 	{
-	    BpTransform(&sp->nextcp,&sp->nextcp,transform);
+	    _BpTransform(&sp->nextcp,&sp->nextcp,transform,tpmask);
 	}
 	else
 	{
@@ -1721,7 +1797,7 @@ static void TransformPointExtended(SplinePoint *sp, real transform[6], enum tran
 
 	if ( !sp->noprevcp )
 	{
-	    BpTransform(&sp->prevcp,&sp->prevcp,transform);
+	    _BpTransform(&sp->prevcp,&sp->prevcp,transform,tpmask);
 	}
 	else
 	{
@@ -1760,7 +1836,7 @@ static void TransformSpiro(spiro_cp *cp, real transform[6]) {
 }
 
 static void TransformPTsInterpolateCPs(BasePoint *fromorig,Spline *spline,
-	BasePoint *toorig,real transform[6] ) {
+	BasePoint *toorig,real transform[6], enum transformPointMask tpmask ) {
     BasePoint totrans, temp;
     bigreal fraction;
 
@@ -1769,7 +1845,7 @@ static void TransformPTsInterpolateCPs(BasePoint *fromorig,Spline *spline,
     /*  last spline both from and to will have been transform. We can detect */
     /*  this because toorig will be different from &spline->to->me */
     if ( spline->to->selected && toorig==&spline->to->me )
-	BpTransform(&totrans,&spline->to->me,transform);
+	_BpTransform(&totrans,&spline->to->me,transform,tpmask);
     else
 	totrans = spline->to->me;
 
@@ -1780,9 +1856,9 @@ static void TransformPTsInterpolateCPs(BasePoint *fromorig,Spline *spline,
 	fraction = (spline->to->prevcp.x-fromorig->x)/( toorig->x-fromorig->x );
 	spline->to->prevcp.x = spline->from->me.x + fraction*( totrans.x-spline->from->me.x );
     } else {
-	BpTransform(&temp,&spline->from->nextcp,transform);
+	_BpTransform(&temp,&spline->from->nextcp,transform,tpmask);
 	spline->from->nextcp.x = temp.x;
-	BpTransform(&temp,&spline->to->prevcp,transform);
+	_BpTransform(&temp,&spline->to->prevcp,transform,tpmask);
 	spline->to->prevcp.x = temp.x;
     }
     if ( fromorig->y!=toorig->y ) {
@@ -1791,9 +1867,9 @@ static void TransformPTsInterpolateCPs(BasePoint *fromorig,Spline *spline,
 	fraction = (spline->to->prevcp.y-fromorig->y)/( toorig->y-fromorig->y );
 	spline->to->prevcp.y = spline->from->me.y + fraction*( totrans.y-spline->from->me.y );
     } else {
-	BpTransform(&temp,&spline->from->nextcp,transform);
+	_BpTransform(&temp,&spline->from->nextcp,transform,tpmask);
 	spline->from->nextcp.y = temp.y;
-	BpTransform(&temp,&spline->to->prevcp,transform);
+	_BpTransform(&temp,&spline->to->prevcp,transform,tpmask);
 	spline->to->prevcp.y = temp.y;
     }
 
@@ -1818,7 +1894,7 @@ SplinePointList *SplinePointListTransformExtended(SplinePointList *base, real tr
 	    printf("SplinePointListTransformExtended() spl->first->selected %d\n", spl->first->selected );
 	    if ( spl->first->selected ) {
 		anysel = true;
-		BpTransform(&spl->first->me,&spl->first->me,transform);
+		_BpTransform(&spl->first->me,&spl->first->me,transform,tpmask);
 	    } else
 		allsel = false;
 	    for ( spline = spl->first->next; spline!=NULL && spline!=first; spline=spline->to->next ) {
@@ -1828,12 +1904,12 @@ SplinePointList *SplinePointListTransformExtended(SplinePointList *base, real tr
 		{
 		    TransformPTsInterpolateCPs( &lastpointorig, spline,
 						spl->first==spline->to? &firstpointorig : &spline->to->me,
-						transform );
+						transform, tpmask );
 		}
 		lastpointorig = orig;
 		if ( spline->to->selected ) anysel = true; else allsel = false;
 	    }
-	    
+
 	} else {
 	    for ( spt = spl->first ; spt!=pfirst; spt = spt->next->to ) {
 		if ( pfirst==NULL ) pfirst = spt;
@@ -1918,7 +1994,7 @@ SplinePointList *SplinePointListTransform( SplinePointList *base, real transform
 
 SplinePointList *SplinePointListSpiroTransform(SplinePointList *base, real transform[6], int allpoints ) {
     SplinePointList *spl;
-    int allsel, anysel;
+    bool allsel, anysel;
     int i;
 
 
@@ -1926,12 +2002,7 @@ SplinePointList *SplinePointListSpiroTransform(SplinePointList *base, real trans
 return( SplinePointListTransform(base,transform,tpt_AllPoints));
 
     for ( spl = base; spl!=NULL; spl = spl->next ) {
-	allsel = true; anysel=false;
-	for ( i=0; i<spl->spiro_cnt-1; ++i )
-	    if ( spl->spiros[i].ty & 0x80 )
-		anysel = true;
-	    else
-		allsel = false;
+	anysel = SplinePointListCheckSelected1(spl, true, &allsel, true);
 	if ( !anysel )
     continue;
 	if ( allsel ) {
@@ -2138,6 +2209,21 @@ SplinePointList *SPLCopyTransformedHintMasks(RefChar *r,
     memcpy(transform,r->transform,sizeof(transform));
     transform[4] += trans->x; transform[5] += trans->y;
 return( _SPLCopyTransformedHintMasks(r->sc,layer,transform,basesc));
+}
+
+void SplinePointListClearCPSel(SplinePointList *spl) {
+    Spline *spline, *first;
+
+    for ( ; spl!=NULL; spl = spl->next ) {
+	first = NULL;
+	spl->first->nextcpselected = false;
+	spl->first->prevcpselected = false;
+	for ( spline = spl->first->next; spline!=NULL && spline!=first; spline=spline->to->next ) {
+	     spline->to->nextcpselected = false;
+	     spline->to->prevcpselected = false;
+	    if ( first==NULL ) first = spline;
+	}
+    }
 }
 
 void SplinePointListSelect(SplinePointList *spl,int sel) {
@@ -2615,7 +2701,7 @@ return( NULL );
     while ( *pt==' ' || *pt=='[' ) ++pt;
     while ( *pt!=']' && *pt!='\0' ) {
 	pscontext->blend_values[ pscontext->instance_count ] =
-		c_strtod(pt,&end);
+		g_ascii_strtod(pt,&end);
 	if ( pt==end )
     break;
 	++(pscontext->instance_count);
@@ -2676,7 +2762,7 @@ return( NULL );
 	    break;
 		}
 		mm->positions[ipos*mm->axis_count+apos] =
-			c_strtod(pt,&end);
+			g_ascii_strtod(pt,&end);
 		if ( pt==end )
 	    break;
 		++apos;
@@ -2710,8 +2796,8 @@ return( NULL );
 		while ( *pt==' ' ) ++pt;
 		if ( *pt=='[' ) {
 		    ++pt;
-		    designs[ppos] = c_strtod(pt,&end);
-		    blends[ppos] = c_strtod(end,&end);
+		    designs[ppos] = g_ascii_strtod(pt,&end);
+		    blends[ppos] = g_ascii_strtod(end,&end);
 		    if ( blends[ppos]<0 || blends[ppos]>1 ) {
 			LogError( _("Bad value for blend in /BlendDesignMap for axis %s.\n"), mm->axes[apos] );
 			if ( blends[ppos]<0 ) blends[ppos] = 0;
@@ -2757,7 +2843,7 @@ return( NULL );
 		if ( pt!=NULL ) {
 		    pt = MMExtractNth(pt,ipos);
 		    if ( pt!=NULL ) {
-			bigreal val = c_strtod(pt,NULL);
+			bigreal val = g_ascii_strtod(pt,NULL);
 			free(pt);
 			switch ( item ) {
 			  case 0: fd->fontinfo->italicangle = val; break;
@@ -2959,7 +3045,7 @@ static void LayerToRefLayer(struct reflayer *rl,Layer *layer, real transform[6])
     rl->fillfirst = layer->fillfirst;
 }
 
-int RefLayerFindBaseLayerIndex(RefChar *rf, int layer) {
+static int RefLayerFindBaseLayerIndex(RefChar *rf, int layer) {
 	// Note that most of the logic below is copied and lightly modified from SCReinstanciateRefChar.
 	SplineChar *rsc = rf->sc;
 	int i = 0, j = 0, cnt = 0;
@@ -4645,7 +4731,7 @@ int LineTangentToSplineThroughPt(Spline *s, BasePoint *pt, extended ts[4],
     Quartic quad;
     int i,j,k;
 
-    if ( !finite(pt->x) || !finite(pt->y) ) {
+    if ( !isfinite(pt->x) || !isfinite(pt->y) ) {
 	IError( "Non-finite arguments passed to LineTangentToSplineThroughPt");
 return( -1 );
     }
@@ -5320,6 +5406,22 @@ void AnchorPointsFree(AnchorPoint *ap) {
     }
 }
 
+void GuidelineSetFree(GuidelineSet *gl) {
+    GuidelineSet *glnext;
+    for ( ; gl!=NULL; gl = glnext ) {
+	glnext = gl->next;
+	if (gl->name != NULL) {
+		free(gl->name);
+		gl->name = NULL;
+	}
+	if (gl->identifier != NULL) {
+		free(gl->identifier);
+		gl->identifier = NULL;
+	}
+	chunkfree(gl,sizeof(GuidelineSet));
+    }
+}
+
 void ValDevFree(ValDevTab *adjust) {
     if ( adjust==NULL )
 return;
@@ -5785,7 +5887,7 @@ void SplineCharListsFree(struct splinecharlist *dlist) {
 }
 
 struct pattern *PatternCopy(struct pattern *old, real transform[6]) {
-    struct pattern *pat = chunkalloc(sizeof(struct pattern));
+    struct pattern *pat;
 
     if ( old==NULL )
 return( NULL );
@@ -5807,7 +5909,7 @@ return;
 }
 
 struct gradient *GradientCopy(struct gradient *old,real transform[6]) {
-    struct gradient *grad = chunkalloc(sizeof(struct gradient));
+    struct gradient *grad;
 
     if ( old==NULL )
 return( NULL );
@@ -5850,6 +5952,7 @@ void LayerFreeContents(SplineChar *sc,int layer) {
     GradientFree(sc->layers[layer].stroke_pen.brush.gradient);
     PatternFree(sc->layers[layer].stroke_pen.brush.pattern);
     RefCharsFree(sc->layers[layer].refs);
+    GuidelineSetFree(sc->layers[layer].guidelines);
     ImageListsFree(sc->layers[layer].images);
     /* image garbage collection????!!!! */
     UndoesFree(sc->layers[layer].undoes);
@@ -5863,6 +5966,7 @@ void SplineCharFreeContents(SplineChar *sc) {
 return;
     if (sc->name != NULL) free(sc->name);
     if (sc->comment != NULL) free(sc->comment);
+    if (sc->user_decomp != NULL) free(sc->user_decomp);
     for ( i=0; i<sc->layer_cnt; ++i ) {
 #if defined(_NO_PYTHON)
         if (sc->layers[i].python_persistent != NULL) free( sc->layers[i].python_persistent );	/* It's a string of pickled data which we leave as a string */
@@ -6225,21 +6329,6 @@ EncMap *EncMap1to1(int enccount) {
     return( map );
 }
 
-static void EncodingFree(Encoding *enc) {
-    int i;
-
-    if ( enc==NULL )
-return;
-    free(enc->enc_name);
-    free(enc->unicode);
-    if ( enc->psnames!=NULL ) {
-	for ( i=0; i<enc->char_cnt; ++i )
-	    free(enc->psnames[i]);
-	free(enc->psnames);
-    }
-    free(enc);
-}
-
 void EncMapFree(EncMap *map) {
     if ( map==NULL )
 return;
@@ -6261,7 +6350,7 @@ EncMap *EncMapCopy(EncMap *map) {
     /* Ensure all memory available, otherwise cleanup and exit as NULL */
     if ( (new=chunkalloc(sizeof(EncMap)))!=NULL ) {
 	*new = *map;
-	if ( (new->map=malloc(map->enccount*sizeof(int32)))!=NULL ) {
+	if ( (new->map=malloc(map->encmax*sizeof(int32)))!=NULL ) {
 	    if ( (new->backmap=malloc(map->backmax*sizeof(int32)))!=NULL ) {
 		memcpy(new->map,map->map,map->enccount*sizeof(int32));
 		memcpy(new->backmap,map->backmap,map->backmax*sizeof(int32));
@@ -6542,7 +6631,7 @@ return;
         }
       }
       free(sf->layers); sf->layers = NULL;
-    }   
+    }
     free(sf);
 }
 
@@ -6558,6 +6647,13 @@ return;
     for ( i=0; i<sf->glyphcnt; ++i ) if ( sf->glyphs[i]!=NULL ) {
 	struct splinechar *sc = sf->glyphs[i];
 	if (sc->glif_name != NULL) { free(sc->glif_name); sc->glif_name = NULL; }
+	// Go through layers.
+	int lyi;
+	for ( lyi=0; lyi<sc->layer_cnt; ++lyi ) {
+		// Free guidelines.
+		GuidelineSetFree(sc->layers[lyi].guidelines);
+		sc->layers[lyi].guidelines = NULL;
+	}
     }
     for ( i=0; i<sf->subfontcnt; ++i )
 	SplineFontClearSpecial(sf->subfonts[i]);
@@ -6582,7 +6678,7 @@ return;
           sf->layers[layer].ufo_path = NULL;
         }
       }
-    }   
+    }
 }
 
 #if 0
@@ -6734,7 +6830,6 @@ char * delimit_null(const char * input, char delimiter) {
   return output;
 }
 
-#ifdef FF_UTHASH_GLIF_NAMES
 int HashKerningClassNamesFlex(SplineFont *sf, struct glif_name_index * class_name_hash, int capitalize) {
     struct kernclass *current_kernclass;
     int isv;
@@ -6767,7 +6862,6 @@ int HashKerningClassNames(SplineFont *sf, struct glif_name_index * class_name_ha
 int HashKerningClassNamesCaps(SplineFont *sf, struct glif_name_index * class_name_hash) {
   return HashKerningClassNamesFlex(sf, class_name_hash, 1);
 }
-#endif
 
 int KerningClassSeekByAbsoluteIndex(const struct splinefont *sf, int seek_index, struct kernclass **okc, int *oisv, int *oisr, int *ooffset) {
     int current = 0;
@@ -6825,7 +6919,7 @@ char **StringExplode(const char *input, char delimiter) {
     while (*pstart == delimiter) pstart++;
     pend = pstart;
     while (*pend != delimiter && *pend != '\0') pend++;
-    if (pend > pstart) output[entry_count++] = strndup(pstart, pend-pstart);
+    if (pend > pstart) output[entry_count++] = copyn(pstart, pend-pstart);
     pstart = pend;
   }
   return output;
@@ -7281,6 +7375,48 @@ int SplineSetsRemoveAnnoyingExtrema(SplineSet *ss,bigreal err) {
 	for ( s = ss->first->next; s!=NULL && s!=first; s = s->to->next ) {
 	    if ( first == NULL ) first = s;
 	    if ( SplineRemoveAnnoyingExtrema(s,err_sq))
+		changed = true;
+	}
+	ss = ss->next;
+    }
+return( changed );
+}
+
+int SplineRemoveWildControlPoints(Spline *s, bigreal distratio) {
+	// If the distance between the control point and its base
+	// exceeds the the distance between the base points
+	// by a great factor,
+	// it is likely erroneous and is likely to cause problems.
+	// So we remove it.
+	if (s->from == NULL || s->to == NULL)
+		return 0;
+	int changed;
+	bigreal pdisplacement = DistanceBetweenPoints(&s->from->me, &s->to->me);
+	bigreal bcdisplacement0 = 0.0;
+	bigreal bcdisplacement1 = 0.0;
+	if (!s->from->nonextcp)
+		bcdisplacement0 = DistanceBetweenPoints(&s->from->me, &s->from->nextcp);
+	if (!s->to->noprevcp)
+		bcdisplacement1 = DistanceBetweenPoints(&s->to->me, &s->to->prevcp);
+	if (pdisplacement == 0 || MAX(bcdisplacement0, bcdisplacement1) / pdisplacement > distratio) {
+		changed = s->islinear = s->from->nonextcp = s->to->noprevcp = true;
+		s->from->nextcp = s->from->me;
+		s->to->prevcp = s->to->me;
+		SplineRefigure(s);
+	}
+	return changed;
+}
+
+int SplineSetsRemoveWildControlPoints(SplineSet *ss, bigreal distratio) {
+    int changed = false;
+    Spline *s, *first;
+
+
+    while ( ss!=NULL ) {
+	first = NULL;
+	for ( s = ss->first->next; s!=NULL && s!=first; s = s->to->next ) {
+	    if ( first == NULL ) first = s;
+	    if ( SplineRemoveWildControlPoints(s,distratio))
 		changed = true;
 	}
 	ss = ss->next;
@@ -7814,8 +7950,7 @@ bigreal DistanceBetweenPoints( BasePoint *p1, BasePoint *p2 )
     bigreal t = pow(p1->x - p2->x,2) + pow(p1->y - p2->y,2);
     if( !t )
 	return t;
-    
+
     t = sqrt( t );
     return t;
 }
-

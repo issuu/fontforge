@@ -25,15 +25,23 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "gxdrawP.h"
-#include "gxcdrawP.h"
+#include <fontforge-config.h>
 
-#include <stdlib.h>
-#include <math.h>
+#ifdef FONTFORGE_CAN_USE_GDK
 
-#include <ustring.h>
-#include <utype.h>
+void GDrawEnableCairo(int on) {
+    /* With GDK, Cairo is always enabled. */
+}
+
+#else // FONTFORGE_CAN_USE_GDK
+
 #include "fontP.h"
+#include "gxcdrawP.h"
+#include "gxdrawP.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
 
 #ifdef __Mac
 # include <sys/utsname.h>
@@ -164,7 +172,7 @@ static int GXCDrawSetline(GXWindow gw, GGC *mine) {
 	    mine->dash_offset != gcs->dash_offset ) {
 	double dashes[2];
 	dashes[0] = mine->dash_len; dashes[1] = mine->skip_len;
-	cairo_set_dash(gw->cc,dashes,0,mine->dash_offset);
+	cairo_set_dash(gw->cc, dashes, (mine->dash_len == 0) ? 0 : 2, mine->dash_offset);
 	gcs->dash_offset = mine->dash_offset;
 	gcs->dash_len = mine->dash_len;
 	gcs->skip_len = mine->skip_len;
@@ -199,7 +207,19 @@ void _GXCDraw_ClipPreserve(GXWindow gw) {
     cairo_clip_preserve( gw->cc );
 }
 
-
+/**
+ *  \brief Sets Cairo to use the difference operator with antialiasing disabled.
+ *  To ensure that difference mode only applies temporarily, ensure that
+ *  PushClip or PushClipOnly has been called before this function. Call PopClip
+ *  to return to normal mode. This mode is used to perform cursor blinking
+ *  (a minimal replacement for XOR mode).
+ *
+ *  \param [in] gw The window to set apply the difference operator to.
+ */
+void _GXCDraw_SetDifferenceMode(GXWindow gw) {
+    cairo_set_operator(gw->cc, CAIRO_OPERATOR_DIFFERENCE);
+    cairo_set_antialias(gw->cc, CAIRO_ANTIALIAS_NONE);
+}
 
 /* ************************************************************************** */
 /* ***************************** Cairo Drawing ****************************** */
@@ -232,6 +252,31 @@ void _GXCDraw_DrawLine(GXWindow gw, int32 x,int32 y, int32 xend,int32 yend) {
     cairo_stroke(gw->cc);
 }
 
+/**
+ *  \brief Draws an arc (circular and elliptical).
+ *
+ *  \param [in] gw The window to draw on.
+ *  \param [in] rect The bounding box of the arc. If width!=height, then
+ *                   an elliptical arc will be drawn.
+ *  \param [in] start_angle The start angle in radians (Cairo coordinates)
+ *  \param [in] end_angle The end angle in radians (Cairo coordinates)
+ */
+void _GXCDraw_DrawArc(GXWindow gw, GRect *rect, double start_angle, double end_angle) {
+    int width = GXCDrawSetline(gw, gw->ggc);
+
+    cairo_new_path(gw->cc);
+    cairo_save(gw->cc);
+    if (width&1) {
+        cairo_translate(gw->cc, rect->x+.5 + rect->width / 2., rect->y+.5 + rect->height / 2.);
+    } else {
+        cairo_translate(gw->cc, rect->x + rect->width / 2., rect->y + rect->height / 2.);
+    }
+    cairo_scale(gw->cc, rect->width / 2., rect->height / 2.);
+    cairo_arc(gw->cc, 0., 0., 1., start_angle, end_angle);
+    cairo_restore(gw->cc);
+    cairo_stroke(gw->cc);
+}
+
 void _GXCDraw_DrawRect(GXWindow gw, GRect *rect) {
     int width = GXCDrawSetline(gw,gw->ggc);
 
@@ -253,7 +298,7 @@ void _GXCDraw_FillRect(GXWindow gw, GRect *rect) {
 }
 
 void _GXCDraw_FillRoundRect(GXWindow gw, GRect *rect, int radius) {
-    double degrees = M_PI / 180.0;
+    double degrees = FF_PI / 180.0;
 
     GXCDrawSetcolfunc(gw,gw->ggc);
 
@@ -446,7 +491,7 @@ static cairo_surface_t *GImage2Surface(GImage *image, GRect *src, uint8 **_data)
     /*  premultiply each channel by alpha. We can reuse it for non-transparent*/
     /*  rgb images */
     if ( base->image_type == it_true && type == CAIRO_FORMAT_RGB24 ) {
-	idata = ((uint32 *) (base->data)) + src->y*base->bytes_per_line + src->x;
+	idata = ((uint32 *)(base->data + src->y * base->bytes_per_line)) + src->x;
 	*_data = NULL;		/* We can reuse the image's own data, don't need a copy */
 return( cairo_image_surface_create_for_data((uint8 *) idata,type,
 		src->width, src->height,
@@ -672,9 +717,6 @@ void _GXCDraw_Image( GXWindow gw, GImage *image, GRect *src, int32 x, int32 y) {
     gw->cairo_state.fore_col = COLOR_UNKNOWN;
 }
 
-void _GXCDraw_TileImage( GXWindow gw, GImage *image, GRect *src, int32 x, int32 y) {
-}
-
 /* What we really want to do is use the grey levels as an alpha channel */
 void _GXCDraw_Glyph( GXWindow gw, GImage *image, GRect *src, int32 x, int32 y) {
     struct _GImage *base = image->list_len==0?image->u.image:image->u.images[0];
@@ -803,17 +845,7 @@ return;
 enum gcairo_flags _GXCDraw_CairoCapabilities( GXWindow gw) {
     enum gcairo_flags flags = gc_all;
 
-return( flags|gc_xor );	/* If not buffered, we can emulate xor by having X11 do it in the X layer */
-}
-/* ************************************************************************** */
-/* **************************** Synchronization ***************************** */
-/* ************************************************************************** */
-void _GXCDraw_Flush(GXWindow gw) {
-    cairo_surface_flush(gw->cs);
-}
-
-void _GXCDraw_DirtyRect(GXWindow gw,double x, double y, double width, double height) {
-    cairo_surface_mark_dirty_rectangle(gw->cs,x,y,width,height);
+return( flags );
 }
 #else
 int _GXCDraw_hasCairo(void) {
@@ -909,7 +941,7 @@ void _GXPDraw_NewWindow(GXWindow nw) {
     {
 	if ( gdisp->pango_context==NULL ) {
 	    gdisp->pango_fontmap = pango_xft_get_font_map(gdisp->display,gdisp->screen);
-	    gdisp->pango_context = pango_xft_get_context(gdisp->display,gdisp->screen);
+	    gdisp->pango_context = pango_font_map_create_context(gdisp->pango_fontmap);
 	    /* No obvious way to get or set the resolution of pango_xft */
 	}
 	nw->xft_w = XftDrawCreate(gdisp->display,nw->w,gdisp->visual,gdisp->cmap);
@@ -1066,16 +1098,6 @@ int32 _GXPDraw_DoText8(GWindow w, int32 x, int32 y,
 return( rect.width );
 }
 
-int32 _GXPDraw_DoText(GWindow w, int32 x, int32 y,
-	const unichar_t *text, int32 cnt, Color col,
-	enum text_funcs drawit, struct tf_arg *arg) {
-    char *temp = cnt>=0 ? u2utf8_copyn(text,cnt) : u2utf8_copy(text);
-    if (temp == NULL) return 0;
-    int width = _GXPDraw_DoText8(w,x,y,temp,-1,col,drawit,arg);
-    free(temp);
-return(width);
-}
-
 void _GXPDraw_FontMetrics(GWindow gw, GFont *fi, int *as, int *ds, int *ld) {
     GXDisplay *gdisp = ((GXWindow) gw)->display;
     PangoFont *pfont;
@@ -1203,3 +1225,5 @@ return( -1 );
 
 return( line->start_index );
 }
+
+#endif // FONTFORGE_CAN_USE_GDK

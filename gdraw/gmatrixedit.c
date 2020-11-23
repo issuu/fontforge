@@ -24,17 +24,17 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "ffglib.h"
 #include "gdraw.h"
-#include "../gdraw/gdrawP.h"
-#include "gkeysym.h"
+#include "gdrawP.h"
 #include "ggadgetP.h"
-#include "gwidget.h"
+#include "gkeysym.h"
 #include "gresource.h"
-#include <string.h>
-#include <ustring.h>
-#include "../fontforge/ffglib.h"
-#include <glib/gprintf.h>
-#include "xvasprintf.h"
+#include "gwidget.h"
+#include "ustring.h"
 
 #define DEL_SPACE	6
 
@@ -1625,13 +1625,13 @@ static void GMatrixEdit_SubExpose(GMatrixEdit *gme,GWindow pixmap,GEvent *event)
 		if ( r+gme->off_top==gme->rows ) {
 		    if ( !gme->no_edit ) {
 			if ( gme->newtext!=NULL )
-			    buf = xasprintf( "<%s>", gme->newtext );
+			    buf = smprintf( "<%s>", gme->newtext );
 			else if ( _ggadget_use_gettext )
-			    buf = xasprintf( "<%s>", S_("Row|New") );
+			    buf = smprintf( "<%s>", S_("Row|New") );
 			else {
 			    gchar *tmp = g_ucs4_to_utf8( (const gunichar *) GStringGetResource( _STR_New, NULL ),
 				   -1, NULL, NULL, NULL );
-			    buf = xasprintf( "<%s>", tmp );
+			    buf = smprintf( "<%s>", tmp );
 			    g_free( tmp ); tmp = NULL;
 			}
 			GDrawDrawText8( pixmap, gme->col_data[0].x - gme->off_left,y,

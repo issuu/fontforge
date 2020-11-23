@@ -25,16 +25,16 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <fontforge-config.h>		
-#include <gwwiconv.h>
-#include <stddef.h>
-#include <ustring.h>
-#include <utype.h>
-#include <charset.h>
-#include <chardata.h>
+#include <fontforge-config.h>
+
+#include "chardata.h"
+#include "charset.h"
+#include "gwwiconv.h"
+#include "ustring.h"
+#include "utype.h"
 
 int local_encoding = e_iso8859_1;
-#if HAVE_ICONV
+#if HAVE_ICONV_H
 char *iconv_local_encoding_name = NULL;
 #endif
 
@@ -151,42 +151,9 @@ return( encoding2u_strncpy(uto,_from,n,e_iso8859_1));
 	    ++ufrom;
 	    --n;
 	}
-    } else if ( cs==e_utf8 ) {
-	while ( *from && n>0 ) {
-	    if ( *from<=127 )
-		*upt = *from++;
-	    else if ( *from<=0xdf ) {
-		if ( from[1]>=0x80 ) {
-		    *upt = ((*from&0x1f)<<6) | (from[1]&0x3f);
-		    from += 2;
-		} else {
-		    ++from;	/* Badly formed utf */
-		    *upt = 0xfffd;
-		}
-	    } else if ( *from<=0xef ) {
-		if ( from[1]>=0x80 && from[2]>=0x80 ) {
-		    *upt = ((*from&0xf)<<12) | ((from[1]&0x3f)<<6) | (from[2]&0x3f);
-		    from += 3;
-		} else {
-		    ++from;	/* Badly formed utf */
-		    *upt = 0xfffd;
-		}
-	    } else if ( n>2 ) {
-		if ( from[1]>=0x80 && from[2]>=0x80 && from[3]>=0x80 ) {
-		    int w = ( ((*from&0x7)<<2) | ((from[1]&0x30)>>4) )-1;
-		    *upt++ = 0xd800 | (w<<6) | ((from[1]&0xf)<<2) | ((from[2]&0x30)>>4);
-		    *upt   = 0xdc00 | ((from[2]&0xf)<<6) | (from[3]&0x3f);
-		    from += 4;
-		} else {
-		    ++from;	/* Badly formed utf */
-		    *upt = 0xfffd;
-		}
-	    } else {
-		/* no space for surrogate */
-		from += 4;
-	    }
-	    ++upt;
-	}
+    } else if ( cs==e_utf8 && n > 0 ) {
+        utf82u_strncpy(uto, _from, n+1);
+        return uto;
     } else {
 	if ( !bad_enc_warn ) {
 	    bad_enc_warn = true;
@@ -343,38 +310,7 @@ return( u2encoding_strncpy(to,ufrom,n,e_iso8859_1));
 	if ( n>1 )
 	    *uto = '\0';
     } else if ( cs==e_utf8 ) {
-	while ( *ufrom ) {
-	    if ( *ufrom<0x80 ) {
-		if ( n<=1 )
-	break;
-		*pt++ = *ufrom;
-		--n;
-	    } else if ( *ufrom<0x800 ) {
-		if ( n<=2 )
-	break;
-		*pt++ = 0xc0 | (*ufrom>>6);
-		*pt++ = 0x80 | (*ufrom&0x3f);
-		n -= 2;
-	    } else if ( *ufrom>=0xd800 && *ufrom<0xdc00 && ufrom[1]>=0xdc00 && ufrom[1]<0xe000 ) {
-		int u = ((*ufrom>>6)&0xf)+1, y = ((*ufrom&3)<<4) | ((ufrom[1]>>6)&0xf);
-		if ( n<=4 )
-	    break;
-		*pt++ = 0xf0 | (u>>2);
-		*pt++ = 0x80 | ((u&3)<<4) | ((*ufrom>>2)&0xf);
-		*pt++ = 0x80 | y;
-		*pt++ = 0x80 | (ufrom[1]&0x3f);
-		n -= 4;
-	    } else {
-		if ( n<=3 )
-	    break;
-		*pt++ = 0xe0 | (*ufrom>>12);
-		*pt++ = 0x80 | ((*ufrom>>6)&0x3f);
-		*pt++ = 0x80 | (*ufrom&0x3f);
-	    }
-	    ++ufrom;
-	}
-	if ( n>1 )
-	    *pt = '\0';
+	u2utf8_strncpy(to, ufrom, n);
     } else {
 	if ( !bad_enc_warn ) {
 	    bad_enc_warn = true;
@@ -386,7 +322,7 @@ return( u2encoding_strncpy(to,ufrom,n,e_iso8859_1));
 return( to );
 }
 
-#if HAVE_ICONV
+#if HAVE_ICONV_H
 static char *old_local_name=NULL;
 static iconv_t to_unicode=(iconv_t) (-1), from_unicode=(iconv_t) (-1);
 static iconv_t to_utf8=(iconv_t) (-1), from_utf8=(iconv_t) (-1);
@@ -405,7 +341,7 @@ static int BytesNormal(iconv_t latin1_2_unicode) {
     char *to = &u[0].c[0];
     size_t in_left = 1, out_left = sizeof(u);
     memset(u,0,sizeof(u));
-    iconv( latin1_2_unicode, (char **) &from, &in_left, &to, &out_left);
+    iconv( latin1_2_unicode, (iconv_arg2_t) &from, &in_left, &to, &out_left);
     if ( u[0].s=='A' )
 return( true );
 
@@ -484,11 +420,11 @@ return( true );
 #endif
 
 unichar_t *def2u_strncpy(unichar_t *uto, const char *from, size_t n) {
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     if ( my_iconv_setup() ) {
 	size_t in_left = n, out_left = sizeof(unichar_t)*n;
 	char *cto = (char *) uto;
-	iconv(to_unicode, (char **) &from, &in_left, &cto, &out_left);
+	iconv(to_unicode, (iconv_arg2_t) &from, &in_left, &cto, &out_left);
 	if ( cto<((char *) uto)+2*n) *cto++ = '\0';
 	if ( cto<((char *) uto)+2*n) *cto++ = '\0';
 	if ( cto<((char *) uto)+4*n) *cto++ = '\0';
@@ -500,11 +436,11 @@ return( encoding2u_strncpy(uto,from,n,local_encoding));
 }
 
 char *u2def_strncpy(char *to, const unichar_t *ufrom, size_t n) {
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     if ( my_iconv_setup() ) {
 	size_t in_left = sizeof(unichar_t)*n, out_left = n;
 	char *cfrom = (char *) ufrom, *cto=to;
-	iconv(from_unicode, (char **) &cfrom, &in_left, &cto, &out_left);
+	iconv(from_unicode, (iconv_arg2_t) &cfrom, &in_left, &cto, &out_left);
 	if ( cto<to+n ) *cto++ = '\0';
 	if ( cto<to+n ) *cto++ = '\0';
 	if ( cto<to+n ) *cto++ = '\0';
@@ -523,11 +459,11 @@ unichar_t *def2u_copy(const char *from) {
     len = strlen(from);
     uto = (unichar_t *) malloc((len+1)*sizeof(unichar_t));
     if ( uto==NULL ) return( NULL );
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     if ( my_iconv_setup() ) {
 	size_t in_left = len, out_left = sizeof(unichar_t)*len;
 	char *cto = (char *) uto;
-	iconv(to_unicode, (char **) &from, &in_left, &cto, &out_left);
+	iconv(to_unicode, (iconv_arg2_t) &from, &in_left, &cto, &out_left);
 	*cto++ = '\0';
 	*cto++ = '\0';
 	*cto++ = '\0';
@@ -549,13 +485,13 @@ char *u2def_copy(const unichar_t *ufrom) {
 
     if ( ufrom==NULL ) return( NULL );
     len = u_strlen(ufrom);
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     if ( my_iconv_setup() ) {
 	size_t in_left = sizeof(unichar_t)*len, out_left = 3*len;
 	char *cfrom = (char *) ufrom, *cto;
 	cto = to = (char *) malloc(3*len+2);
 	if ( cto==NULL ) return( NULL );
-	iconv(from_unicode, (char **) &cfrom, &in_left, &cto, &out_left);
+	iconv(from_unicode, (iconv_arg2_t) &cfrom, &in_left, &cto, &out_left);
 	*cto++ = '\0';
 	*cto++ = '\0';
 	*cto++ = '\0';
@@ -588,12 +524,12 @@ char *def2utf8_copy(const char *from) {
 
     if ( from==NULL ) return( NULL );
     len = strlen(from);
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     if ( my_iconv_setup() ) {
 	size_t in_left = len, out_left = 3*(len+1);
 	char *cto = (char *) malloc(3*(len+1)), *cret = cto;
 	if ( cto==NULL ) return( NULL );
-	iconv(to_utf8, (char **) &from, &in_left, &cto, &out_left);
+	iconv(to_utf8, (iconv_arg2_t) &from, &in_left, &cto, &out_left);
 	*cto++ = '\0';
 	*cto++ = '\0';
 	*cto++ = '\0';
@@ -621,13 +557,13 @@ char *utf82def_copy(const char *ufrom) {
 
     if ( ufrom==NULL ) return( NULL );
     len = strlen(ufrom);
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     if ( my_iconv_setup() ) {
 	size_t in_left = len, out_left = 3*len;
 	char *cfrom = (char *) ufrom, *cto, *to;
 	cto = to = (char *) malloc(3*len+2);
 	if ( cto==NULL ) return( NULL );
-	iconv(from_utf8, (char **) &cfrom, &in_left, &cto, &out_left);
+	iconv(from_utf8, (iconv_arg2_t) &cfrom, &in_left, &cto, &out_left);
 	*cto++ = '\0';
 	*cto++ = '\0';
 	*cto++ = '\0';

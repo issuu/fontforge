@@ -24,12 +24,32 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "fvimportbdf.h"
+
+#include "bitmapchar.h"
+#include "bvedit.h"
+#include "chardata.h"
+#include "cvimages.h"
+#include "encoding.h"
 #include "fontforgevw.h"
-#include <gfile.h>
-#include <math.h>
-#include "utype.h"
+#include "fvfonts.h"
+#include "gfile.h"
+#include "macbinary.h"
+#include "mem.h"
+#include "namelist.h"
+#include "palmfonts.h"
+#include "parsettf.h"
+#include "splinefill.h"
+#include "splineutil.h"
+#include "splineutil2.h"
 #include "ustring.h"
-#include <chardata.h>
+#include "utype.h"
+#include "winfonts.h"
+
+#include <math.h>
 #include <unistd.h>
 
 static char *cleancopy(const char *name) {
@@ -1628,7 +1648,7 @@ static void TwoByteSwap(uint8 *bitmap,int sizebitmaps) {
 static void FourByteSwap(uint8 *bitmap,int sizebitmaps) {
     int i, t;
 
-    for ( i=0; i<sizebitmaps-1; i+=2 ) {
+    for ( i=0; i<sizebitmaps-1; i+=4 ) {
 	t = bitmap[i];
 	bitmap[i] = bitmap[i+3];
 	bitmap[i+3] = t;
@@ -1669,7 +1689,7 @@ return( false );
 	/* Nothing to do */;
     else if ( PCF_SCAN_UNIT(format)==2 )
 	TwoByteSwap(bitmap, sizebitmaps);
-    else if ( PCF_SCAN_UNIT(format)==2 )
+    else if ( PCF_SCAN_UNIT(format)==4 )
 	FourByteSwap(bitmap, sizebitmaps);
     if ( PCF_GLYPH_PAD(format)==1 ) {
 	for ( i=0; i<cnt; ++i ) {
@@ -2277,30 +2297,36 @@ static void SFAddToBackground(SplineFont *sf,BDFFont *bdf);
 
 int FVImportBDF(FontViewBase *fv, char *filename, int ispk, int toback) {
     BDFFont *b, *anyb=NULL;
-    char buf[300];
-    char *eod, *fpt, *file, *full;
+    char *buf, *eod, *fpt, *file, *full, *freeme;
     int fcnt, any = 0;
     int oldenccnt = fv->map->enccount;
 
+    freeme = filename = copy(filename);
     eod = strrchr(filename,'/');
-    *eod = '\0';
+    if (eod != NULL) {
+        *eod = '\0';
+        file = eod+1;
+    } else {
+        file = filename;
+        filename = ".";
+    }
     fcnt = 1;
-    fpt = eod+1;
+    fpt = file;
     while (( fpt=strstr(fpt,"; "))!=NULL )
 	{ ++fcnt; fpt += 2; }
 
-    sprintf(buf, _("Loading font from %.100s"), filename);
+    buf = smprintf(_("Loading font from %.100s"), filename);
     ff_progress_start_indicator(10,_("Loading..."),buf,_("Reading Glyphs"),0,fcnt);
     ff_progress_enable_stop(false);
+    free(buf);
 
-    file = eod+1;
     do {
 	fpt = strstr(file,"; ");
 	if ( fpt!=NULL ) *fpt = '\0';
-	full = malloc(strlen(filename)+1+strlen(file)+1);
-	strcpy(full,filename); strcat(full,"/"); strcat(full,file);
-	sprintf(buf, _("Loading font from %.100s"), filename);
+	full = smprintf("%s/%s", filename, file);
+	buf = smprintf(_("Loading font from %.100s"), full);
 	ff_progress_change_line1(buf);
+	free(buf);
 	b = _SFImportBDF(fv->sf,full,ispk,toback, fv->map);
 	free(full);
 	if ( fpt!=NULL ) ff_progress_next_stage();
@@ -2316,7 +2342,7 @@ int FVImportBDF(FontViewBase *fv, char *filename, int ispk, int toback) {
 	FontViewBase *fvs;
 	for ( fvs=fv->sf->fv; fvs!=NULL; fvs=fvs->nextsame ) {
 	    free(fvs->selected);
-	    fvs->selected = calloc(fvs->map->enccount,sizeof(char));
+	    fvs->selected = calloc(fvs->map->enccount,sizeof(uint8));
 	}
 	FontViewReformatAll(fv->sf);
     }
@@ -2324,6 +2350,7 @@ int FVImportBDF(FontViewBase *fv, char *filename, int ispk, int toback) {
 	ff_post_error( _("No Bitmap Font"), _("Could not find a bitmap font in %s"), filename );
     } else if ( toback )
 	SFAddToBackground(fv->sf,anyb);
+    free(freeme);
 return( any );
 }
 

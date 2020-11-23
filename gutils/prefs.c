@@ -25,14 +25,11 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "prefs.h"
-#include <glib.h>
-#include <stdio.h>
-#include "ustring.h"
-#include "fileutil.h"
-#include "gfile.h"
+#include <fontforge-config.h>
 
-int cmdlinearg_forceUIHidden = 0;
+#include "prefs.h"
+
+// FIXME: Remove this file...
 
 int cv_auto_goto = 0;
 

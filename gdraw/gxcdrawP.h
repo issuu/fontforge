@@ -1,5 +1,11 @@
-#ifndef _GXCDRAWP_H
-# define _GXCDRAWP_H
+#ifndef FONTFORGE_GXCDRAWP_H
+#define FONTFORGE_GXCDRAWP_H
+
+#include <fontforge-config.h>
+
+#ifndef FONTFORGE_CAN_USE_GDK
+
+#include "gxdrawP.h"
 
 extern int _GXCDraw_hasCairo(void);
 #ifndef _NO_LIBCAIRO
@@ -12,9 +18,11 @@ extern void _GXCDraw_PushClip(GXWindow gw);
 extern void _GXCDraw_PopClip(GXWindow gw);
 extern void _GXCDraw_PushClipOnly(GXWindow gw);
 extern void _GXCDraw_ClipPreserve(GXWindow gw);
+extern void _GXCDraw_SetDifferenceMode(GXWindow gw);
 
 extern void _GXCDraw_Clear(GXWindow gw, GRect *rect);
 extern void _GXCDraw_DrawLine(GXWindow gw, int32 x,int32 y, int32 xend,int32 yend);
+extern void _GXCDraw_DrawArc(GXWindow gw, GRect *rect, double start_angle, double end_angle);
 extern void _GXCDraw_DrawRect(GXWindow gw, GRect *rect);
 extern void _GXCDraw_FillRect(GXWindow gw, GRect *rect);
 extern void _GXCDraw_FillRoundRect(GXWindow gw, GRect *rect, int radius);
@@ -45,9 +53,6 @@ extern void _GXCDraw_PathStroke(GWindow w,Color col);
 extern void _GXCDraw_PathFill(GWindow w,Color col);
 extern void _GXCDraw_PathFillAndStroke(GWindow w,Color fillcol, Color strokecol);
 
-extern void _GXCDraw_Flush(GXWindow gw);
-extern void _GXCDraw_DirtyRect(GXWindow gw,double x, double y, double width, double height);
-
 #include "fontP.h"
 #endif
 extern void _GXPDraw_NewWindow(GXWindow nw);
@@ -56,9 +61,6 @@ extern void _GXPDraw_DestroyWindow(GXWindow nw);
 extern PangoFontDescription *_GXPDraw_configfont(GWindow gw, GFont *font);
 extern int32 _GXPDraw_DoText8(GWindow w, int32 x, int32 y,
 	const char *text, int32 cnt, Color col,
-	enum text_funcs drawit, struct tf_arg *arg);
-extern int32 _GXPDraw_DoText(GWindow w, int32 x, int32 y,
-	const unichar_t *text, int32 cnt, Color col,
 	enum text_funcs drawit, struct tf_arg *arg);
 extern void _GXPDraw_FontMetrics(GWindow gw, GFont *fi, int *as, int *ds, int *ld);
 extern void _GXPDraw_LayoutInit(GWindow w, char *text, int cnt, GFont *fi);
@@ -70,4 +72,6 @@ extern void _GXPDraw_LayoutSetWidth(GWindow w, int width);
 extern int  _GXPDraw_LayoutLineCount(GWindow w);
 extern int  _GXPDraw_LayoutLineStart(GWindow w,int l);
 
-#endif /* _GXCDRAWP_H */
+#endif /* FONTFORGE_CAN_USE_GDK */
+
+#endif /* FONTFORGE_GXCDRAWP_H */

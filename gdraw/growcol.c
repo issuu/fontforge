@@ -24,9 +24,12 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
-#include "gkeysym.h"
 #include "ggadgetP.h"
+#include "gkeysym.h"
 #include "gwidget.h"
 #include "ustring.h"
 
@@ -397,7 +400,7 @@ return( false );
 	    GDrawFillRect(pixmap,&r,GRowColLabelBg);
 	    for ( i=0; i<grc->cols; ++i ) {
 		GTextInfoDraw(pixmap,g->inner.x+grc->colx[i]+grc->hpad-grc->xoff,y,grc->labels[i],
-			grc->font,grc->labels[l]->disabled?dfg:dfg,g->box->active_border
+			grc->font,dfg,g->box->active_border
 			g->inner.y+g->inner.height);
 	    }
 	}
@@ -411,7 +414,7 @@ return( false );
 		if ( l!=grc->tfr || i!=grc->tfc ) {
 		    GTextInfo *ti = grc->ti[l*grc->cols+i];
 		    GTextInfoDraw(pixmap,g->inner.x+grc->colx[i]-grc->xoff+grc->hpad,y,ti,
-			    grc->font,ti->disabled?dfg:dfg,g->box->active_border,
+			    grc->font,dfg,g->box->active_border,
 			    g->inner.y+g->inner.height);
 		} else {
 		    /* now we can draw the text field */

@@ -24,21 +24,19 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <ustring.h>
 
-#include <gdraw.h>
-#include <gresource.h>
-#include <fileutil.h>
+#include <fontforge-config.h>
+
 #include "charset.h"
 #include "fontP.h"
-#include <utype.h>
-
+#include "gdraw.h"
+#include "gfile.h"
+#include "gresource.h"
 #include "gresourceP.h"
+#include "ustring.h"
+#include "utype.h"
 
-char *GResourceProgramName, *GResourceFullProgram, *GResourceProgramDir;
+char *GResourceProgramName;
 char *usercharset_names;
 /* int local_encoding = e_iso8859_1;*/
 
@@ -169,16 +167,6 @@ return;
 	GResourceProgramName = copy("gdraw");
     else
 return;
-
-    free(GResourceProgramDir);
-    GResourceProgramDir = _GFile_find_program_dir(prog);
-    if ( GResourceProgramDir==NULL ) {
-	GFileGetAbsoluteName(".",filename,sizeof(filename));
-	GResourceProgramDir = copy(filename);
-    }
-    free(GResourceFullProgram);
-    GResourceFullProgram = copy(
-	    GFileBuildName(GResourceProgramDir,GResourceProgramName,filename,sizeof(filename)));
 }
 
 void GResourceAddResourceString(char *string,char *prog) {

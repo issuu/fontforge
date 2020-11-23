@@ -24,10 +24,13 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _UIINTERFACE_H
-#define _UIINTERFACE_H
-# include <basics.h>
+
+#ifndef FONTFORGE_UIINTERFACE_H
+#define FONTFORGE_UIINTERFACE_H
+
 #include <fontforge-config.h>
+
+#include "basics.h"
 
 /* This encapsulates a set of callbacks and stubs. The callbacks get activated*/
 /*  when an event happens (a glyph in a font changes for example, then all */
@@ -37,6 +40,9 @@
 /* ************************************************************************** */
 /* Basic, low-level UI routines for events we discover deep inside script code*/
 /* ************************************************************************** */
+
+struct importparams;
+struct exportparams;
 
 struct ui_interface {
    /* The following is used to post a fontforge internal error */
@@ -76,7 +82,7 @@ struct ui_interface {
 
     /* Multiple things can be selected, sel is an in/out parameter, one byte */
     /*  per entry in the choice array. 0=> not selected, 1=>selected */
-    int (*choose_multiple)(char *title, const char **choices,char *sel,
+    int (*choose_multiple)(const char *title, const char **choices, char *sel,
 	    int cnt, char *buts[2], const char *question,...);
 
    /* Here we want a string. We are passed a default answer (or NULL) */
@@ -121,9 +127,8 @@ struct ui_interface {
     const char *(*strid)(int);
     const char *(*mslang)(int);
 
-   /* pops up a dlg asking user whether to do remove overlap (and other stuff)*/
-   /*  when loading an eps file with strokes, etc. */
-    int (*stroke_flags)(void);
+    void (*import_dlg)(struct importparams *ip);
+    void (*export_dlg)(struct exportparams *ep);
 };
 extern struct ui_interface *ui_interface;
 
@@ -160,7 +165,8 @@ extern struct ui_interface *ui_interface;
 #define TTFNameIds			(ui_interface->strid)
 #define MSLangString			(ui_interface->mslang)
 
-#define PsStrokeFlagsDlg		(ui_interface->stroke_flags)
+#define ImportParamsDlg			(ui_interface->import_dlg)
+#define ExportParamsDlg			(ui_interface->export_dlg)
 
 void FF_SetUiInterface(struct ui_interface *uii);
 
@@ -356,8 +362,6 @@ extern struct fi_interface *fi_interface;
 #define FIOTLookupCopyInto			(fi_interface->copy_into)
 #define FontInfo_Destroy			(fi_interface->destroy)
 
-void FF_SetFIInterface(struct fi_interface *fii);
-
 /* ************************************************************************** */
 /*                           Updating font windows                            */
 /* ************************************************************************** */
@@ -511,8 +515,7 @@ extern struct clip_interface *clip_interface;
 #define ClipboardRequest	(clip_interface->request_clip)
 #define ClipboardHasType	(clip_interface->clip_has_type)
 
-void FF_SetClipInterface(struct clip_interface *clipi);
-
 extern const char *NOUI_TTFNameIds(int id);
 extern const char *NOUI_MSLangString(int language);
-#endif
+
+#endif /* FONTFORGE_UIINTERFACE_H */

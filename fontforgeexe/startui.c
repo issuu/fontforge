@@ -25,40 +25,42 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define GTimer GTimer_GTK
-#define GList  GList_Glib
-#include <glib.h>
-#include <glib-object.h>
-#undef GTimer
-#undef GList
-
 #include <fontforge-config.h>
+#include <fontforge-version-extras.h>
+
+#include "autosave.h"
+#include "bitmapchar.h"
+#include "clipnoui.h"
+#include "encoding.h"
+#include "ffgdk.h"
+#include "ffglib.h"
 #include "fontforgeui.h"
+#include "gfile.h"
+#include "gresource.h"
+#include "hotkeys.h"
+#include "lookups.h"
+#include "prefs.h"
+#include "start.h"
+#include "ustring.h"
+
+#include <locale.h>
+#include <stdlib.h>		/* getenv,setenv */
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+
+#if defined(__MINGW32__)
+#include <windows.h>
+#define sleep(n) Sleep(1000 * (n))
+#endif
+
 #ifndef _NO_LIBUNICODENAMES
 #include <libunicodenames.h>	/* need to open a database when we start */
 extern uninm_names_db names_db; /* Unicode character names and annotations database */
 extern uninm_blocks_db blocks_db;
 #endif
-#include <gfile.h>
-#include <gresource.h>
-#include <ustring.h>
-#include <ltdl.h>
-#include <time.h>
-#include <sys/time.h>
-#include <locale.h>
-#include <unistd.h>
-#include <dynamic.h>
-#include <stdlib.h>		/* getenv,setenv */
-#include <sys/stat.h>
-#include <sys/types.h>
-#include "../gdraw/hotkeys.h"
-#include "gutils/prefs.h"
-
-
-#define GTimer GTimer_GTK
-#include <glib.h>
-#include <glib-object.h>
-#undef GTimer
 
 #ifdef __Mac
 extern void setup_cocoa_app();
@@ -77,7 +79,7 @@ extern void setup_cocoa_app();
 #  endif
 #endif
 #ifdef __Mac
-#  include <carbon.h>
+#  include "carbon.h"
 /* For reasons obscure to me RunApplicationEventLoop is not defined in */
 /*  the mac header files if we are in 64 bit mode. Strangely it seems to */
 /*  be in the libraries and functional */
@@ -96,12 +98,8 @@ extern void setup_cocoa_app();
 //#  endif
 #endif
 
-#if defined(__MINGW32__)
-#include <windows.h>
-#define sleep(n) Sleep(1000 * (n))
-#endif
-
-#include "collabclientui.h"
+// Must be included after png.h because it messes with setjmp
+#include "scripting.h"
 
 extern int AutoSaveFrequency;
 int splash = 1;
@@ -151,7 +149,6 @@ static void _dousage(void) {
     printf( "\t-help\t\t\t (displays this message, and exits)\n" );
     printf( "\t-docs\t\t\t (displays this message, invokes a browser)\n\t\t\t\t (Using the BROWSER environment variable)\n" );
     printf( "\t-version\t\t (prints the version of fontforge and exits)\n" );
-    printf( "\t-library-status\t (prints information about optional libraries\n\t\t\t\t and exits)\n" );
 #ifndef _NO_PYTHON
     printf( "\t-lang=py\t\t use python for scripts (may precede -script)\n" );
 #endif
@@ -189,7 +186,7 @@ exit(0);
 
 static void dohelp(void) {
     _dousage();
-    help("overview.html");
+    help("index.html", NULL);
 exit(0);
 }
 
@@ -206,33 +203,44 @@ static void InsCharHook(GDisplay *gd,unichar_t ch) {
     GInsCharSetChar(ch);
 }
 
-extern GImage splashimage;
+extern GImage splashimage_legacy;
+static GImage *splashimagep;
 static GWindow splashw;
 static GTimer *autosave_timer, *splasht;
-static GFont *splash_font, *splash_italic;
+static GFont *splash_font, *splash_italic, *splash_mono;
 static int as,fh, linecnt;
-static unichar_t msg[470];
-static unichar_t *lines[30], *is, *ie;
+static unichar_t msg[546];
+static unichar_t *lines[32], *is, *ie;
+
+static void SplashImageInit() {
+    if (splashimagep == NULL)
+        splashimagep = GGadgetImageCache("splash2020.png");
+    if (splashimagep == NULL)
+	splashimagep = &splashimage_legacy;
+    return;
+}
 
 void ShowAboutScreen(void) {
     static int first=1;
 
     if ( first ) {
-	GDrawResize(splashw,splashimage.u.image->width,splashimage.u.image->height+linecnt*fh);
+	GDrawResize(splashw,splashimagep->u.image->width,splashimagep->u.image->height+linecnt*fh);
 	first = false;
     }
+    
     if ( splasht!=NULL )
-	GDrawCancelTimer(splasht);
+    GDrawCancelTimer(splasht);
     splasht=NULL;
+
     GDrawSetVisible(splashw,true);
 }
 
 static void SplashLayout() {
     unichar_t *start, *pt, *lastspace;
-    extern const char *source_modtime_str;
-    extern const char *source_version_str;
 
-    uc_strcpy(msg, "When my father finished his book on Renaissance printing (The Craft of Printing and the Publication of Shakespeare's Works) he told me that I would have to write the chapter on computer typography. This is my attempt to do so.");
+    SplashImageInit();
+
+    u_strcpy(msg, utf82u_copy("As he drew closer to completing his book on Renaissance printing (The Craft of Printing and the Publication of Shakespeare’s Works), George Williams IV suggested that his son, George Williams V, write a chapter on computer typography. FontForge—previously called PfaEdit—was his response."));
 
     GDrawSetFont(splashw,splash_font);
     linecnt = 0;
@@ -241,7 +249,7 @@ static void SplashLayout() {
 	lastspace = NULL;
 	for ( pt=start; ; ++pt ) {
 	    if ( *pt==' ' || *pt=='\0' ) {
-		if ( GDrawGetTextWidth(splashw,start,pt-start)<splashimage.u.image->width-10 )
+		if ( GDrawGetTextWidth(splashw,start,pt-start)<splashimagep->u.image->width-10 )
 		    lastspace = pt;
 		else
 	break;
@@ -254,24 +262,33 @@ static void SplashLayout() {
 	lines[linecnt++] = pt;
 	if ( *pt ) ++pt;
     }
-    uc_strcpy(pt, " FontForge used to be named PfaEdit.");
 
+    uc_strcpy(pt," ");
     pt += u_strlen(pt);
     lines[linecnt++] = pt;
-    uc_strcpy(pt,"  git hash: ");
-    pt += u_strlen(pt);
-    lines[linecnt++] = pt;
-    uc_strcat(pt, " ");
-    uc_strcat(pt, FONTFORGE_GIT_VERSION);
 
+    uc_strcpy(pt, " As of 2012 FontForge development continues on GitHub.");
     pt += u_strlen(pt);
     lines[linecnt++] = pt;
-    uc_strcpy(pt,"  Version: ");
-    uc_strcat(pt,FONTFORGE_MODTIME_STR);
 
+    uc_strcpy(pt," ");
     pt += u_strlen(pt);
     lines[linecnt++] = pt;
-    uc_strcat(pt,"           (");
+
+    uc_strcpy(pt," Version:");
+    uc_strcat(pt,FONTFORGE_VERSION);
+    pt += u_strlen(pt);
+    lines[linecnt++] = pt;
+
+    // Can be empty if e.g. building from a tarball
+    if (FONTFORGE_GIT_VERSION[0] != '\0') {
+	uc_strcpy(pt,"  ");
+	uc_strcat(pt, FONTFORGE_GIT_VERSION);
+	pt += u_strlen(pt);
+	lines[linecnt++] = pt;
+    }
+
+    uc_strcat(pt," Built: ");
     uc_strcat(pt,FONTFORGE_MODTIME_STR);
     uc_strcat(pt,"-ML");
 #ifdef FREETYPE_HAS_DEBUGGER
@@ -283,14 +300,15 @@ static void SplashLayout() {
 #ifdef FONTFORGE_CONFIG_USE_DOUBLE
     uc_strcat(pt,"-D");
 #endif
-    uc_strcat(pt,")");
+#ifdef FONTFORGE_CAN_USE_GDK
+    uc_strcat(pt, "-GDK3");
+#else
+    uc_strcat(pt,"-X11");
+#endif
     pt += u_strlen(pt);
     lines[linecnt++] = pt;
-    uc_strcpy(pt,"  Lib Version: ");
-    uc_strcat(pt,FONTFORGE_MODTIME_STR);
-    lines[linecnt++] = pt+u_strlen(pt);
     lines[linecnt] = NULL;
-    is = u_strchr(msg,'(');
+    is = u_strchr(msg,'(')+1;
     ie = u_strchr(msg,')');
 }
 
@@ -307,8 +325,8 @@ static void DoDelayedEvents(GEvent *event) {
     struct delayed_event *info = (struct delayed_event *) (event->u.timer.userdata);
 
     if ( info!=NULL ) {
-	(info->func)(info->data);
-	free(info);
+       (info->func)(info->data);
+       free(info);
     }
     GDrawCancelTimer(t);
 }
@@ -389,7 +407,8 @@ static void start_splash_screen(void){
     GDrawSync(NULL);
     GDrawProcessPendingEvents(NULL);
     GDrawProcessPendingEvents(NULL);
-    splasht = GDrawRequestTimer(splashw,1000,1000,NULL);
+
+    splasht = GDrawRequestTimer(splashw,7000,1000,NULL);
 
     localsplash = false;
 }
@@ -399,11 +418,13 @@ static FILE *logfile;
 
 /* These are the four apple events to which we currently respond */
 static pascal OSErr OpenApplicationAE( const AppleEvent * theAppleEvent,
-	AppleEvent * reply, SInt32 handlerRefcon) {
+	AppleEvent * reply, SRefCon handlerRefcon) {
  fprintf( logfile, "OPENAPP event received.\n" ); fflush( logfile );
     if ( localsplash )
 	start_splash_screen();
+#ifndef FONTFORGE_CAN_USE_GDK
     system( "DYLD_LIBRARY_PATH=\"\"; osascript -e 'tell application \"X11\" to activate'" );
+#endif // FONTFORGE_CAN_USE_GDK
     if ( fv_list==NULL )
 	_FVMenuOpen(NULL);
  fprintf( logfile, " event processed %d.\n", noErr ); fflush( logfile );
@@ -411,11 +432,13 @@ return( noErr );
 }
 
 static pascal OSErr ReopenApplicationAE( const AppleEvent * theAppleEvent,
-	AppleEvent * reply, SInt32 handlerRefcon) {
+	AppleEvent * reply, SRefCon handlerRefcon) {
  fprintf( logfile, "ReOPEN event received.\n" ); fflush( logfile );
     if ( localsplash )
 	start_splash_screen();
+#ifndef FONTFORGE_CAN_USE_GDK
     system( "DYLD_LIBRARY_PATH=\"\"; osascript -e 'tell application \"X11\" to activate'" );
+#endif // FONTFORGE_CAN_USE_GDK
     if ( fv_list==NULL )
 	_FVMenuOpen(NULL);
  fprintf( logfile, " event processed %d.\n", noErr ); fflush( logfile );
@@ -423,20 +446,21 @@ return( noErr );
 }
 
 static pascal OSErr ShowPreferencesAE( const AppleEvent * theAppleEvent,
-	AppleEvent * reply, SInt32 handlerRefcon) {
+	AppleEvent * reply, SRefCon handlerRefcon) {
  fprintf( logfile, "PREFS event received.\n" ); fflush( logfile );
     if ( localsplash )
 	start_splash_screen();
+#ifndef FONTFORGE_CAN_USE_GDK
     system( "DYLD_LIBRARY_PATH=\"\"; osascript -e 'tell application \"X11\" to activate'" );
+#endif // FONTFORGE_CAN_USE_GDK
     DoPrefs();
  fprintf( logfile, " event processed %d.\n", noErr ); fflush( logfile );
 return( noErr );
 }
 
 static pascal OSErr OpenDocumentsAE( const AppleEvent * theAppleEvent,
-	AppleEvent * reply, SInt32 handlerRefcon) {
+	AppleEvent * reply, SRefCon handlerRefcon) {
     AEDescList  docList;
-    FSRef       theFSRef;
     long        index;
     long        count = 0;
     OSErr       err;
@@ -450,14 +474,32 @@ static pascal OSErr OpenDocumentsAE( const AppleEvent * theAppleEvent,
                          typeAEList, &docList);
     err = AECountItems(&docList, &count);
     for(index = 1; index <= count; index++) {
-        err = AEGetNthPtr(&docList, index, typeFSRef,
-                        NULL, NULL, &theFSRef,
-                        sizeof(theFSRef), NULL);// 4
-	err = FSRefMakePath(&theFSRef,(unsigned char *) buffer,sizeof(buffer));
+        AEDesc aDoc;
+        size_t bytecount;
+        void *pathPtr;
+        CFURLRef url;
+        err = AEGetNthDesc(&docList, index, typeFileURL, NULL, &aDoc);
+        if (err != noErr) {
+            continue;
+        }
+        bytecount = AEGetDescDataSize(&aDoc);
+        pathPtr = malloc(bytecount);
+        err = AEGetDescData(&aDoc, pathPtr, bytecount);
+        if (err != noErr) {
+            free(pathPtr);
+            continue;
+        }
+        url = CFURLCreateWithBytes(nil, pathPtr, bytecount,
+                                   kCFStringEncodingUTF8, nil);
+        free(pathPtr);
+        CFURLGetFileSystemRepresentation(url, true, (UInt8*)buffer, sizeof(buffer));
+        CFRelease(url);
 	ViewPostScriptFont(buffer,0);
  fprintf( logfile, " file: %s\n", buffer );
     }
+#ifndef FONTFORGE_CAN_USE_GDK
     system( "DYLD_LIBRARY_PATH=\"\"; osascript -e 'tell application \"X11\" to activate'" );
+#endif // FONTFORGE_CAN_USE_GDK
     AEDisposeDesc(&docList);
  fprintf( logfile, " event processed %d.\n", err ); fflush( logfile );
 
@@ -513,23 +555,23 @@ static  OSErr install_apple_event_handlers(void) {
 
     err     = AEInstallEventHandler(kCoreEventClass, kAEOpenApplication,
                 NewAEEventHandlerUPP(OpenApplicationAE), 0, false);
-    require_noerr(err, CantInstallAppleEventHandler);
+    __Require_noErr(err, CantInstallAppleEventHandler);
 
     err     = AEInstallEventHandler(kCoreEventClass, kAEReopenApplication,
                 NewAEEventHandlerUPP(ReopenApplicationAE), 0, false);
-    require_noerr(err, CantInstallAppleEventHandler);
+    __Require_noErr(err, CantInstallAppleEventHandler);
 
     err     = AEInstallEventHandler(kCoreEventClass, kAEOpenDocuments,
                 NewAEEventHandlerUPP(OpenDocumentsAE), 0, false);
-    require_noerr(err, CantInstallAppleEventHandler);
+    __Require_noErr(err, CantInstallAppleEventHandler);
 
     err     = AEInstallEventHandler(kCoreEventClass, kAEQuitApplication,
                 NewAEEventHandlerUPP(QuitApplicationAE), 0, false);
-    require_noerr(err, CantInstallAppleEventHandler);
+    __Require_noErr(err, CantInstallAppleEventHandler);
 
     err     = AEInstallEventHandler(kCoreEventClass, kAEShowPreferences,
                 NewAEEventHandlerUPP(ShowPreferencesAE), 0, false);
-    require_noerr(err, CantInstallAppleEventHandler);
+    __Require_noErr(err, CantInstallAppleEventHandler);
 
  /* some debugging code, for now */
  if ( getenv("HOME")!=NULL ) {
@@ -547,7 +589,6 @@ CantInstallAppleEventHandler:
 
 static pascal void DoRealStuff(EventLoopTimerRef timer,void *ignored_data) {
     GDrawProcessPendingEvents(NULL);
-    MacServiceReadFDs();
 }
 
 static void install_mac_timer(void) {
@@ -561,7 +602,6 @@ static void install_mac_timer(void) {
 #endif
 
 static int splash_e_h(GWindow gw, GEvent *event) {
-    static int splash_cnt;
     GRect old;
     int i, y, x;
     static char *foolishness[] = {
@@ -585,44 +625,54 @@ static int splash_e_h(GWindow gw, GEvent *event) {
       break;
       case et_expose:
 	GDrawPushClip(gw,&event->u.expose.rect,&old);
-	GDrawDrawImage(gw,&splashimage,NULL,0,0);
-	GDrawSetFont(gw,splash_font);
-	y = splashimage.u.image->height + as + fh/2;
-	for ( i=1; i<linecnt; ++i ) {
-	    if ( is>=lines[i-1]+1 && is<lines[i] ) {
-		x = 8+GDrawDrawText(gw,8,y,lines[i-1]+1,is-lines[i-1]-1,0x000000);
-		GDrawSetFont(gw,splash_italic);
-		GDrawDrawText(gw,x,y,is,lines[i]-is,0x000000);
-	    } else if ( ie>=lines[i-1]+1 && ie<lines[i] ) {
-		x = 8+GDrawDrawText(gw,8,y,lines[i-1]+1,ie-lines[i-1]-1,0x000000);
-		GDrawSetFont(gw,splash_font);
-		GDrawDrawText(gw,x,y,ie,lines[i]-ie,0x000000);
-	    } else
-		GDrawDrawText(gw,8,y,lines[i-1]+1,lines[i]-lines[i-1]-1,0x000000);
-	    y += fh;
+	GDrawDrawImage(gw,splashimagep,NULL,0,0);
+	if ((event->u.expose.rect.y+event->u.expose.rect.height) > splashimagep->u.image->height) {
+	    GDrawSetFont(gw,splash_font);
+	    y = splashimagep->u.image->height + as + fh/2;
+	    for ( i=1; i<linecnt; ++i ) {
+	    // The number 10 comes from lines[linecnt] created in the function SplashLayout. It refers
+	    // to the line at which we want to make the font monospace. If you add or remove a line, 
+	    // you will need to change this.
+	    if (i == 10) {
+		    x = 8+GDrawDrawText(gw,8,y,lines[i-1]+1,0,0x000000);
+		    GDrawSetFont(gw,splash_mono);
+	    GDrawDrawText(gw,8,y,lines[i-1]+1,lines[i]-lines[i-1]-1,0x000000);
+	    } else if ( is>=lines[i-1]+1 && is<lines[i] ) {
+		    x = 8+GDrawDrawText(gw,8,y,lines[i-1]+1,is-lines[i-1]-1,0x000000);
+		    GDrawSetFont(gw,splash_italic);
+		    GDrawDrawText(gw,x,y,is,lines[i]-is,0x000000);
+		} else if ( ie>=lines[i-1]+1 && ie<lines[i] ) {
+		    x = 8+GDrawDrawText(gw,8,y,lines[i-1]+1,ie-lines[i-1]-1,0x000000);
+		    GDrawSetFont(gw,splash_font);
+		    GDrawDrawText(gw,x,y,ie,lines[i]-ie,0x000000);
+		} else
+		    GDrawDrawText(gw,8,y,lines[i-1]+1,lines[i]-lines[i-1]-1,0x000000);
+		y += fh;
+	    }
 	}
 	GDrawPopClip(gw,&old);
       break;
       case et_map:
-	splash_cnt = 0;
-      break;
-      case et_timer:
-	if ( event->u.timer.timer==autosave_timer ) {
-	    DoAutoSaves();
-	} else if ( event->u.timer.timer==splasht ) {
-	    if ( ++splash_cnt==1 )
-		GDrawResize(gw,splashimage.u.image->width,splashimage.u.image->height-30);
-	    else if ( splash_cnt==2 )
-		GDrawResize(gw,splashimage.u.image->width,splashimage.u.image->height);
-	    else if ( splash_cnt>=7 ) {
-		GGadgetEndPopup();
-		GDrawSetVisible(gw,false);
-		GDrawCancelTimer(splasht);
-		splasht = NULL;
-	    }
-	} else {
-	    DoDelayedEvents(event);
+	// The splash screen used to gradually resize the longer it was displayed.
+	// This was removed. But there is a gxdraw bug which prevents
+	// the splash from being displayed properly unless a resize occurs.
+	// So this forces a resize to make it display properly...
+	GDrawGetSize(gw, &old);
+	if (old.height < splashimagep->u.image->height) {
+	    GDrawResize(gw,splashimagep->u.image->width,splashimagep->u.image->height);
 	}
+	break;
+      case et_timer:
+      if ( event->u.timer.timer==autosave_timer ) {
+          DoAutoSaves();
+      } else if ( event->u.timer.timer==splasht ) {
+          GGadgetEndPopup();
+          GDrawSetVisible(gw,false);
+          GDrawCancelTimer(splasht);
+          splasht = NULL;
+      } else {
+          DoDelayedEvents(event);
+      }
       break;
       case et_char:
       case et_mousedown:
@@ -708,19 +758,22 @@ static int get_mac_x11_prop(char *keystr) {
     CFStringRef key, appID;
     int val;
 
-    appID = CFStringCreateWithBytes(NULL,(uint8 *) "com.apple.x11",strlen("com.apple.x11"), kCFStringEncodingISOLatin1, 0);
+    appID = CFSTR("com.apple.x11");
     key   = CFStringCreateWithBytes(NULL,(uint8 *) keystr,strlen(keystr), kCFStringEncodingISOLatin1, 0);
     ret = CFPreferencesCopyAppValue(key,appID);
     if ( ret==NULL ) {
 	/* Sigh. Apple uses a different preference file under 10.5.6 I really */
 	/*  wish they'd stop making stupid, unnecessary changes */
-	appID = CFStringCreateWithBytes(NULL,(uint8 *) "org.x.X11",strlen("org.x.X11"), kCFStringEncodingISOLatin1, 0);
+	appID = CFSTR("org.x.X11");
 	ret = CFPreferencesCopyAppValue(key,appID);
     }
+    CFRelease(key);
     if ( ret==NULL )
 return( -1 );
-    if ( CFGetTypeID(ret)!=CFBooleanGetTypeID())
+    if ( CFGetTypeID(ret)!=CFBooleanGetTypeID()) {
+    CFRelease(ret);
 return( -2 );
+    }
     val = CFBooleanGetValue(ret);
     CFRelease(ret);
 return( val );
@@ -793,7 +846,7 @@ static void ffensuredir( const char* basedir, const char* dirname, mode_t mode )
 
     snprintf(buffer,buffersz,"%s/%s", basedir, dirname );
     // ignore errors, this is just to help the user aftre all.
-    mkdir( buffer, mode );
+    GFileMkDir( buffer, mode );
 }
 
 static void ensureDotFontForgeIsSetup() {
@@ -863,8 +916,6 @@ static void WinLoadUserFonts(const char *prefix) {
 
 
 int fontforge_main( int argc, char **argv ) {
-    extern const char *source_modtime_str;
-    extern const char *source_version_str;
     const char *load_prefs = getenv("FONTFORGE_LOADPREFS");
     int i;
     int recover=2;
@@ -900,9 +951,12 @@ int fontforge_main( int argc, char **argv ) {
     }
 
     if (!quiet) {
-        fprintf( stderr, "Copyright (c) 2000-2014 by George Williams. See AUTHORS for Contributors.\n" );
+        time_t tm = FONTFORGE_MODTIME_RAW;
+        struct tm* modtime = gmtime(&tm);
+        fprintf( stderr, "Copyright (c) 2000-%d. See AUTHORS for Contributors.\n", modtime->tm_year+1900 );
         fprintf( stderr, " License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n" );
         fprintf( stderr, " with many parts BSD <http://fontforge.org/license.html>. Please read LICENSE.\n" );
+        fprintf( stderr, " Version: %s\n", FONTFORGE_VERSION );
         fprintf( stderr, " Based on sources from %s"
 	        "-ML"
 #ifdef FREETYPE_HAS_DEBUGGER
@@ -914,12 +968,21 @@ int fontforge_main( int argc, char **argv ) {
 #ifdef FONTFORGE_CONFIG_USE_DOUBLE
 	        "-D"
 #endif
+#ifdef FONTFORGE_CAN_USE_GDK
+            "-GDK3"
+#endif
+#ifdef BUILT_WITH_XORG
+            "-Xorg"
+#endif
 	        ".\n",
 	        FONTFORGE_MODTIME_STR );
-        fprintf( stderr, " Based on source from git with hash: %s\n", FONTFORGE_GIT_VERSION );
+        // Can be empty if e.g. building from a tarball
+        if (FONTFORGE_GIT_VERSION[0] != '\0') {
+            fprintf( stderr, " Based on source from git with hash: %s\n", FONTFORGE_GIT_VERSION );
+        }
     }
 
-#if defined(__Mac)
+#if defined(__Mac) && !defined(FONTFORGE_CAN_USE_GDK)
     /* Start X if they haven't already done so. Well... try anyway */
     /* Must be before we change DYLD_LIBRARY_PATH or X won't start */
     /* (osascript depends on a libjpeg which isn't found if we look in /sw/lib first */
@@ -997,52 +1060,36 @@ int fontforge_main( int argc, char **argv ) {
     /*  or "POSIX". If they've mucked with the locale perhaps they know what  */
     /*  they are doing */
     {
-	int did_keybindings = 0;
+#ifndef FONTFORGE_CAN_USE_GDK
 	int useCommandKey = get_mac_x11_prop("enable_key_equivalents") <= 0;
 
-	if ( local_x && useCommandKey ) {
+	if ( local_x && useCommandKey )
+#endif // FONTFORGE_CAN_USE_GDK
+	{
 	    hotkeySystemSetCanUseMacCommand( 1 );
 
 	    /* Ok, we get the command key */
 	    if ( getenv("LANG")==NULL && getenv("LC_MESSAGES")==NULL ) {
 		setenv("LC_MESSAGES","en_US.UTF-8",0);
 	    }
-	    /* Can we find a set of keybindings designed for the mac with cmd key? */
-	    bind_textdomain_codeset("Mac-FontForge-MenuShortCuts","UTF-8");
-	    bindtextdomain("Mac-FontForge-MenuShortCuts", getLocaleDir());
-	    if ( *dgettext("Mac-FontForge-MenuShortCuts","Flag0x10+")!='F' ) {
-		GMenuSetShortcutDomain("Mac-FontForge-MenuShortCuts");
-		did_keybindings = 1;
-	    }
-	}
-	if ( !did_keybindings ) {
-	    /* Nope. we can't. Fall back to the normal stuff */
-#endif
-	    GMenuSetShortcutDomain("FontForge-MenuShortCuts");
-	    bind_textdomain_codeset("FontForge-MenuShortCuts","UTF-8");
-	    bindtextdomain("FontForge-MenuShortCuts", getLocaleDir());
-#if defined(__Mac)
 	}
     }
-#endif
+#endif // defined(__Mac)
+
+    GMenuSetShortcutDomain("FontForge-MenuShortCuts");
+    bind_textdomain_codeset("FontForge-MenuShortCuts","UTF-8");
+    bindtextdomain("FontForge-MenuShortCuts", getLocaleDir());
+
     bind_textdomain_codeset("FontForge","UTF-8");
     bindtextdomain("FontForge", getLocaleDir());
     textdomain("FontForge");
     GResourceUseGetText();
     {
-	char shareDir[PATH_MAX];
-	char* sd = getShareDir();
-	strncpy( shareDir, sd, PATH_MAX );
-    shareDir[PATH_MAX-1] = '\0';
-	if(!sd) {
-	    strcpy( shareDir, SHAREDIR );
-	}
-
 	char path[PATH_MAX];
-	snprintf(path, PATH_MAX, "%s%s", shareDir, "/pixmaps" );
+	snprintf(path, PATH_MAX, "%s%s", getShareDir(), "/pixmaps" );
 	GGadgetSetImageDir( path );
 
-	snprintf(path, PATH_MAX, "%s%s", shareDir, "/resources/fontforge.resource" );
+	snprintf(path, PATH_MAX, "%s%s", getShareDir(), "/resources/fontforge.resource" );
 	GResourceAddResourceFile(path, GResourceProgramName,false);
     }
     hotkeysLoad();
@@ -1100,8 +1147,6 @@ int fontforge_main( int argc, char **argv ) {
 	    /* already checked for this earlier, no need to do it again */;
 	else if ( strcmp(pt,"-unique")==0 )
 	    unique = 1;
-	else if ( strcmp(pt,"-forceuihidden")==0 )
-	    cmdlinearg_forceUIHidden = 0;
 	else if ( strcmp(pt,"-recover")==0 && i<argc-1 ) {
 	    ++i;
 	    if ( strcmp(argv[i],"none")==0 )
@@ -1129,7 +1174,7 @@ int fontforge_main( int argc, char **argv ) {
 	else if ( strcmp(pt,"-help")==0 )
 	    dousage();
 	else if ( strcmp(pt,"-version")==0 || strcmp(pt,"-v")==0 || strcmp(pt,"-V")==0 )
-	    doversion(FONTFORGE_MODTIME_STR);
+	    doversion(FONTFORGE_VERSION);
 	else if ( strcmp(pt,"-quit")==0 )
 	    quit_request = true;
 	else if ( strcmp(pt,"-home")==0 )
@@ -1145,19 +1190,22 @@ int fontforge_main( int argc, char **argv ) {
 	}
 #endif
     }
-
+#ifdef FONTFORGE_CAN_USE_GDK
+    gdk_set_allowed_backends("win32,quartz,x11");
+    gdk_init(&argc, &argv);
+#endif
     ensureDotFontForgeIsSetup();
 #if defined(__MINGW32__) && !defined(_NO_LIBCAIRO)
     //Load any custom fonts for the user interface
     if (use_cairo) {
-        char *system_load = getGResourceProgramDir();
+        char *system_load = getShareDir();
         char *user_load = getFontForgeUserDir(Data);
         char lbuf[MAX_PATH];
         int lret;
 
         if (system_load != NULL) {
             //Follow the FontConfig APPSHAREFONTDIR location
-            lret = snprintf(lbuf, MAX_PATH, "%s/../share/fonts", system_load);
+            lret = snprintf(lbuf, MAX_PATH, "%s/../fonts", system_load);
             if (lret > 0 && lret < MAX_PATH) {
                 WinLoadUserFonts(lbuf);
             }
@@ -1215,10 +1263,15 @@ int fontforge_main( int argc, char **argv ) {
     wattrs.utf8_window_title = "FontForge";
     wattrs.border_width = 2;
     wattrs.background_color = 0xffffff;
+#ifdef FONTFORGE_CAN_USE_GDK
+    wattrs.is_dlg = true;
+#else
     wattrs.is_dlg = !listen_to_apple_events;
+#endif
     pos.x = pos.y = 200;
-    pos.width = splashimage.u.image->width;
-    pos.height = splashimage.u.image->height-56;		/* 54 */
+    SplashImageInit();
+    pos.width = splashimagep->u.image->width;
+    pos.height = splashimagep->u.image->height-1; // See splash_e_h:et_map
     GDrawBindSelection(NULL,sn_user1,"FontForge");
     if ( unique && GDrawSelectionOwned(NULL,sn_user1)) {
 	/* Different event handler, not a dialog */
@@ -1233,11 +1286,13 @@ exit( 0 );
 
     memset(&rq,0,sizeof(rq));
     rq.utf8_family_name = SERIF_UI_FAMILIES;
-    rq.point_size = 12;
+    rq.point_size = 10;
     rq.weight = 400;
     splash_font = GDrawInstanciateFont(NULL,&rq);
     splash_font = GResourceFindFont("Splash.Font",splash_font);
     GDrawDecomposeFont(splash_font, &rq);
+    splash_mono = GDrawInstanciateFont(NULL,&rq);
+    splash_mono = GResourceFindFont("GTextField.Font",splash_mono);
     rq.style = fs_italic;
     splash_italic = GDrawInstanciateFont(NULL,&rq);
     splash_italic = GResourceFindFont("Splash.ItalicFont",splash_italic);
@@ -1311,13 +1366,9 @@ exit( 0 );
 	else if ( strcmp(pt,"-open")==0 )
 	    doopen = true;
 	else {
-	    printf("else argv[i]:%s\n", argv[i] );
-	    if ( strstr(argv[i],"://")!=NULL ) {		/* Assume an absolute URL */
-		strncpy(buffer,argv[i],sizeof(buffer));
-		buffer[sizeof(buffer)-1]= '\0';
-	    } else
-		GFileGetAbsoluteName(argv[i],buffer,sizeof(buffer));
-	    if ( GFileIsDir(buffer) || (strstr(buffer,"://")!=NULL && buffer[strlen(buffer)-1]=='/')) {
+//	    printf("else argv[i]:%s\n", argv[i] );
+	    GFileGetAbsoluteName(argv[i],buffer,sizeof(buffer));
+	    if ( GFileIsDir(buffer) ) {
 		char *fname;
 		fname = malloc(strlen(buffer)+strlen("/glyphs/contents.plist")+1);
 		strcpy(fname,buffer); strcat(fname,"/glyphs/contents.plist");
@@ -1340,7 +1391,7 @@ exit( 0 );
 			    buffer[strlen(buffer)+1]='\0';
 			    buffer[strlen(buffer)] = '/';
 			}
-			fname = GetPostScriptFontName(buffer,false);
+			fname = GetPostScriptFontName(buffer,false,false);
 			if ( fname!=NULL )
 			    ViewPostScriptFont(fname,openflags);
 			any = 1;	/* Even if we didn't get a font, don't bring up dlg again */
@@ -1354,25 +1405,21 @@ exit( 0 );
     if ( !any && !doopen )
 	any = ReopenLastFonts();
 
-    collabclient_ensureClientBeacon();
-    collabclient_sniffForLocalServer();
-#ifndef _NO_PYTHON
-    PythonUI_namedpipe_Init();
-#endif
-
 #if defined(__Mac)
     if ( listen_to_apple_events ) {
 	install_apple_event_handlers();
+#ifndef FONTFORGE_CAN_USE_GDK
 	install_mac_timer();
 	setup_cocoa_app();
-
 	
 	// WARNING: See declaration of RunApplicationEventLoop() above as to
 	// why you might not want to call that function anymore.
 	// RunApplicationEventLoop();
-	
     } else
-#endif
+#else
+    }
+#endif // FONTFORGE_CAN_USE_GDK
+#endif // __Mac
     if ( doopen || !any )
 	_FVMenuOpen(NULL);
     GDrawEventLoop(NULL);
@@ -1391,15 +1438,13 @@ exit( 0 );
     FontViewFinishNonStatic();
 
     ClearImageCache(); // This frees the contents of imagecache.
-    hotkeysSave();
+    // hotkeysSave();
     LastFonts_Save();
 
 #ifndef _NO_LIBUNICODENAMES
     uninm_names_db_close(names_db);	/* close this database before exiting */
     uninm_blocks_db_close(blocks_db);
 #endif
-
-    lt_dlexit();
 
 return( 0 );
 }

@@ -24,17 +24,39 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <assert.h>
+#include <fontforge-config.h>
+
 #include "gdraw.h"
-#include "ggadgetP.h"
-#include "gwidgetP.h"
-#include "../gdraw/gdrawP.h"
-#include "gio.h"
+#include "gdrawP.h"
 #include "gfile.h"
+#include "ggadgetP.h"
+#include "gicons.h"
+#include "gio.h"
+#include "gwidgetP.h"
 #include "ustring.h"
 #include "utype.h"
-#include "gicons.h"
+#ifdef WIN32
+#include <windows.h>
 
-#include <stdlib.h>
+// Returns "CDQ" if C:\, D:\ and Q:\ are available.
+// This could probably be put in fsys.c, but we don't need it anywhere else,
+// and shouldn't ever.
+static unsigned int WIN32_DRIVES_MAXLEN = 26;
+static char* _DriveLetters() {
+    int idx = -1;
+    char* ret = calloc(WIN32_DRIVES_MAXLEN+1,sizeof(char));
+    DWORD drives = GetLogicalDrives();
+    assert(drives > 0);
+    for (int d = 0; d < WIN32_DRIVES_MAXLEN; d++) {
+        if ( (drives&(1 << d)) ) {
+            ret[++idx] = 'A'+d;
+        }
+    }
+    return ret;
+}
+#endif
 
 /* This isn't really a gadget, it's just a collection of gadgets with some glue*/
 /*  to make them work together. Therefore there are no expose routines here, */
@@ -137,6 +159,9 @@ return( NULL );
 	} else
 return( NULL );
 	++pattern;
+    }
+    if (pattern > eop) {
+        return NULL;
     }
 return( name );
 }
@@ -271,7 +296,11 @@ static GImage *GFileChooserPickIcon(GDirEntry *e) {
     if (strcasecmp("application/x-font-type1", mime) == 0)
 	return( &_GIcon_textfontps );
     if (strcasecmp("application/x-font-ttf", mime) == 0 ||
-	strcasecmp("application/x-font-otf", mime) == 0) {
+	strcasecmp("application/x-font-otf", mime) == 0 ||
+	strcasecmp("font/woff", mime) == 0 ||
+	strcasecmp("font/woff2", mime) == 0 ||
+	strcasecmp("font/ttf", mime) == 0 ||
+	strcasecmp("font/otf", mime) == 0) {
 	return( &_GIcon_ttf );
     }
     if (strcasecmp("application/x-font-cid", mime) == 0 )
@@ -415,6 +444,10 @@ static void GFileChooserErrorDir(GIOControl *gc) {
 static void GFileChooserScanDir(GFileChooser *gfc,unichar_t *dir) {
     GTextInfo **ti=NULL;
     int cnt, tot=0;
+#ifdef _WIN32
+    char* drives = _DriveLetters();
+    int dcnt = strlen(drives);
+#endif
     unichar_t *pt, *ept, *freeme;
 
     dir = u_GFileNormalize(dir);
@@ -452,24 +485,30 @@ static void GFileChooserScanDir(GFileChooser *gfc,unichar_t *dir) {
 	ti = malloc((cnt+1)*sizeof(GTextInfo *));
 	tot = cnt-1;
     }
+
+#ifdef _WIN32
+    ti = realloc(ti, (dcnt+cnt+1)*sizeof(GTextInfo *));
+
+    for (char* c = drives; *c != '\0'; c++) {
+        // Don't put the root twice if we're already on it.
+        if (*c == toupper(dir[0])) continue;
+
+        ti[cnt] = calloc(1,sizeof(GTextInfo));
+        unichar_t* utemp = calloc(3,sizeof(unichar_t));
+        utemp[0] = *c; utemp[1] = ':'; //utemp[2] = '\\'; // utemp[3] = 0;
+        ti[cnt]->text = utemp;
+        ti[cnt]->fg = ti[cnt]->bg = COLOR_DEFAULT;
+        // We don't want to add a new field to GTextInfo as it's used in a lot of places.
+        // This is the next best thing AFAICT.
+        ti[cnt]->userdata = (void*)1;
+        cnt++;
+    }
+    free(drives);
+#endif
     ti[cnt] = calloc(1,sizeof(GTextInfo));
 
     GGadgetSetList(&gfc->directories->g,ti,false);
     GGadgetSelectOneListItem(&gfc->directories->g,0);
-
-    /* Password management for URLs */
-    if ( (pt = uc_strstr(dir,"://"))!=NULL ) {
-	int port;
-	char proto[40];
-	char *host, *username, *password;
-	free( _GIO_decomposeURL(dir,&host,&port,&username,&password));
-	if ( username!=NULL && password==NULL ) {
-	    password = gwwv_ask_password(_("Password?"),"",_("Enter password for %s@%s"), username, host );
-	    cu_strncpy(proto,dir,pt-dir<sizeof(proto)?pt-dir:sizeof(proto));
-	    password = GIO_PasswordCache(proto,host,username,password);
-	}
-	free(host); free(username); free(password);
-    }
 
     if ( gfc->outstanding!=NULL ) {
 	GIOcancel(gfc->outstanding);
@@ -625,39 +664,61 @@ static unichar_t *GFileChooserGetCurDir(GFileChooser *gfc,int dirindex) {
 
     ti = GGadgetGetList(&gfc->directories->g,&len);
     if ( dirindex==-1 )
-	dirindex = 0;
+        dirindex = 0;
     dirindex = dirindex;
 
-    for ( j=len-1, cnt=0; j>=dirindex; --j )
-	cnt += u_strlen(ti[j]->text)+1;
+    for ( j=len-1,cnt=0; j>=dirindex; --j ) {
+        if (ti[j]->userdata != NULL) 
+            continue;
+        cnt += u_strlen(ti[j]->text)+1;
+    }
     pt = dir = malloc((cnt+1)*sizeof(unichar_t));
     for ( j=len-1; j>=dirindex; --j ) {
-	u_strcpy(pt,ti[j]->text);
-	pt += u_strlen(pt);
-	if ( pt[-1]!='/' )
-	    *pt++ = '/';
+        if (ti[j]->userdata != NULL) 
+            continue;
+        u_strcpy(pt,ti[j]->text);
+        pt += u_strlen(pt);
+        if ( pt[-1]!='/' )
+            *pt++ = '/';
     }
     *pt = '\0';
 return( dir );
 }
 
+static void GFileChooserRefresh(GFileChooser *gfc) {
+    unichar_t *dir;
+
+    dir = GFileChooserGetCurDir(gfc,-1);
+    GFileChooserScanDir(gfc,dir);
+    free(dir);
+}
+
+static void GFileChooserSetTitle(GGadget *g,const unichar_t *tit);
+
 /* Handle events from the directory dropdown list */
 static int GFileChooserDListChanged(GGadget *pl,GEvent *e) {
     GFileChooser *gfc;
-    int i; /*int32 len;*/
+    int i;
     unichar_t *dir;
-    /*GTextInfo **ti;*/
 
     if ( e->type!=et_controlevent || e->u.control.subtype!=et_listselected )
 return( true );
     i = GGadgetGetFirstListSelectedItem(pl);
     if ( i==-1 )
 return(true);
-    /*ti = GGadgetGetList(pl,&len);*/
+    gfc = (GFileChooser *) GGadgetGetUserData(pl);
+#ifdef _WIN32
+    int len;
+    GTextInfo **ti;
+    ti = GGadgetGetList(pl,&len);
+    if (ti[i]->userdata != NULL) {
+        GFileChooserSetTitle((GGadget*)gfc, ti[i]->text);
+        GFileChooserRefresh(gfc);
+return( true );
+    }
+#endif
     if ( i==0 )		/* Nothing changed */
 return( true );
-
-    gfc = (GFileChooser *) GGadgetGetUserData(pl);
     dir = GFileChooserGetCurDir(gfc,i);
     GFileChooserScanDir(gfc,dir);
     free(dir);
@@ -845,11 +906,7 @@ static void GFCDirsSeparateToggle(GWindow gw,struct gmenuitem *mi,GEvent *e) {
 
 static void GFCRefresh(GWindow gw,struct gmenuitem *mi,GEvent *e) {
     GFileChooser *gfc = (GFileChooser *) (mi->ti.userdata);
-    unichar_t *dir;
-
-    dir = GFileChooserGetCurDir(gfc,-1);
-    GFileChooserScanDir(gfc,dir);
-    free(dir);
+    GFileChooserRefresh(gfc);
 }
 
 static int GFileChooserHome(GGadget *g, GEvent *e) {
@@ -891,7 +948,14 @@ static int gotten=false;
 
 static void GFCPopupMenu(GGadget *g, GEvent *e) {
     int i;
-    GFileChooser *gfc = (GFileChooser *) GGadgetGetUserData(g);
+    // The reason this casting works is a bit of a hack.
+    // If this was initiated from a right click, `g` will be the GFC GGadget.
+    // Then its userdata would be the initiator's, and NOT the GFC struct.
+    // Thus we cannot call GGadgetGetUserData.
+    // However, since in the GFC struct, its GGadget comes first, effectively
+    // the pointer to its GGadget will equal the pointer to its GFC struct.
+    // I have ensured that all calls to this function pass the GFC GGadget.
+    GFileChooser *gfc = (GFileChooser *) g;
 
     for ( i=0; gfcpopupmenu[i].ti.text!=NULL || gfcpopupmenu[i].ti.line; ++i )
 	gfcpopupmenu[i].ti.userdata = gfc;
@@ -917,7 +981,7 @@ static int GFileChooserConfigure(GGadget *g, GEvent *e) {
 	fake.w = g->base;
 	fake.u.mouse.x = pos.x;
 	fake.u.mouse.y = pos.y+pos.height;
-	GFCPopupMenu(g,&fake);
+	GFCPopupMenu((GGadget*)GGadgetGetUserData(g),&fake);
     }
 return( true );
 }
@@ -1347,13 +1411,16 @@ static unichar_t *GFileChooserGetTitle(GGadget *g) {
     GFileChooser *gfc = (GFileChooser *) g;
     unichar_t *spt, *curdir, *file;
 
-    spt = (unichar_t *) _GGadgetGetTitle(&gfc->name->g);
+    spt = u_GFileNormalizePath(u_copy((unichar_t *)_GGadgetGetTitle(&gfc->name->g)));
     if ( u_GFileIsAbsolute(spt) )
-	file = u_copy(spt);
+	file = spt;
     else {
 	curdir = GFileChooserGetCurDir(gfc,-1);
 	file = u_GFileAppendFile(curdir,spt,gfc->lastname!=NULL);
 	free(curdir);
+    }
+    if (file != spt) {
+        free(spt);
     }
 return( file );
 }
@@ -1530,8 +1597,8 @@ static void GFileChooserCreateChildren(GFileChooser *gfc, int flags) {
     memset(&boxes,'\0',sizeof(boxes));
     memset(&label,'\0',sizeof(label));
 
-    gcd[k].gd.flags = gg_visible|gg_enabled|gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Home Folder");
+    gcd[k].gd.flags = gg_visible|gg_enabled;
+    gcd[k].gd.popup_msg = _("Home Folder");
     label[k].image = &_GIcon_homefolder;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.handle_controlevent = GFileChooserHome;
@@ -1539,8 +1606,8 @@ static void GFileChooserCreateChildren(GFileChooser *gfc, int flags) {
     gcd[k++].creator = GButtonCreate;
     harray[l++] = &gcd[k-1]; harray[l++] = GCD_Glue;
 
-    gcd[k].gd.flags = gg_visible|gg_enabled|gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Bookmarks");
+    gcd[k].gd.flags = gg_visible|gg_enabled;
+    gcd[k].gd.popup_msg = _("Bookmarks");
     label[k].image = &_GIcon_bookmark;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.handle_controlevent = GFileChooserBookmarks;
@@ -1554,8 +1621,8 @@ static void GFileChooserCreateChildren(GFileChooser *gfc, int flags) {
     gcd[k++].creator = GListButtonCreate;
     harray[l++] = &gcd[k-1]; harray[l++] = GCD_Glue;
 
-    gcd[k].gd.flags = gg_visible|gg_enabled|gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Parent Folder");
+    gcd[k].gd.flags = gg_visible|gg_enabled;
+    gcd[k].gd.popup_msg = _("Parent Folder");
     label[k].image = &_GIcon_updir;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.handle_controlevent = GFileChooserUpDirButton;
@@ -1563,8 +1630,8 @@ static void GFileChooserCreateChildren(GFileChooser *gfc, int flags) {
     gcd[k++].creator = GButtonCreate;
     harray[l++] = &gcd[k-1]; harray[l++] = GCD_Glue;
 
-    gcd[k].gd.flags = gg_visible|gg_enabled|gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Configure");
+    gcd[k].gd.flags = gg_visible|gg_enabled;
+    gcd[k].gd.popup_msg = _("Configure");
     label[k].image = &_GIcon_configtool;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.handle_controlevent = GFileChooserConfigure;

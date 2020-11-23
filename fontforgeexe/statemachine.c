@@ -25,12 +25,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "chardata.h"
 #include "fontforgeui.h"
+#include "gkeysym.h"
+#include "lookups.h"
 #include "ttf.h"
-#include <chardata.h>
-#include <utype.h>
-#include <ustring.h>
-#include <gkeysym.h>
+#include "ustring.h"
+#include "utype.h"
 
 #define CID_Classes	305
 
@@ -325,7 +329,7 @@ static int SMD_DoChange(SMD *smd) {
     OTLookup *mlook, *clook;
     const unichar_t *ret;
     unichar_t *end;
-    char *ret8;
+    char *ret8=NULL;
     int16 kbuf[9];
     int kerns;
     int oddcomplain=false;
@@ -437,6 +441,7 @@ return( false );
 
     /* Show changes in main window */
     GDrawRequestExpose(smd->gw,NULL,false);
+    free(ret8);
 return( true );
 }
 
@@ -479,7 +484,7 @@ static int smdedit_e_h(GWindow gw, GEvent *event) {
       break;
       case et_char:
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("statemachine.html#EditTransition");
+	    help("ui/dialogs/statemachine.html", "#statemachine-edittransition");
 return( true );
 	} else if ( event->u.chr.keysym == GK_Escape ) {
 	    smd->edit_done = true;
@@ -839,7 +844,7 @@ static int SMD_Ok(GGadget *g, GEvent *e) {
     for ( i=4; i<sm->class_cnt; ++i ) {
         upt = strstr(classes[i].u.md_str,": ");
         if ( upt==NULL ) upt = classes[i].u.md_str; else upt += 2;
-        sm->classes[i] = copy(GlyphNameListDeUnicode(upt));
+        sm->classes[i] = GlyphNameListDeUnicode(upt);
     }
 
 	StatesFree(sm->state,sm->state_cnt,sm->class_cnt,
@@ -1186,7 +1191,7 @@ static int smd_e_h(GWindow gw, GEvent *event) {
       break;
       case et_char:
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("statemachine.html");
+	    help("ui/dialogs/statemachine.html", NULL);
 return( true );
 	} else if ( event->u.chr.keysym=='q' && (event->u.chr.state&ksm_control)) {
 	    if ( event->u.chr.state&ksm_shift )

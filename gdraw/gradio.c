@@ -24,11 +24,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
-#include "gresource.h"
 #include "ggadgetP.h"
-#include "ustring.h"
 #include "gkeysym.h"
+#include "gresource.h"
+#include "ustring.h"
+
 #include <math.h>
 
 static GBox radio_box = GBOX_EMPTY; /* Don't initialize here */
@@ -315,13 +319,13 @@ return( false );
         int h=gr->onoffrect.height-1-2*bp;
         GRect rect;
         for (c=0, i=0; c<7; c++) {
-            angle=(30+c/6.*120)*M_PI/180;
+            angle=(30+c/6.*120)*FF_PI/180;
             pts[i].x=.5*w*cos(angle)+x+w/2;
             pts[i].y=.5*h*sin(angle)+y+h/4;
             ++i;
         }
         for (c=1; c<6; c++) {
-            angle=(180+30+c/6.*120)*M_PI/180;
+            angle=(180+30+c/6.*120)*FF_PI/180;
             pts[i].x=.5*w*cos(angle)+x+w/2;
             pts[i].y=.5*h*sin(angle)+y+h*3/4;
             ++i;
@@ -346,8 +350,7 @@ return( false );
 
     } else if ( (!gr->ison) && gr->onbox == &visibility_on_box ) {
          /* draw closed eye */
-        GPoint pts[6];
-        int c,i;
+        GPoint pts[7];
         double angle;
 	int bp = gr->onbox->border_type==bt_none ? 0 : GDrawPointsToPixels(pixmap,gr->onbox->border_width);
         int x=gr->onoffrect.x+bp;
@@ -357,16 +360,15 @@ return( false );
         Color fg = g->state==gs_disabled?g->box->disabled_foreground:
 			g->box->main_foreground==COLOR_DEFAULT?GDrawGetDefaultForeground(GDrawGetDisplayOfWindow(pixmap)):
 			g->box->main_foreground;
-        for (c=0, i=0; c<=6; c++) {
-            angle=(30+c/6.*120)*M_PI/180;
+        for (int i = 0; i <= 6; i++) {
+            angle=(30+i/6.*120)*FF_PI/180;
             pts[i].x=.5*w*cos(angle)+x+w/2;
             pts[i].y=.5*h*sin(angle)+y+h/4;
 
              /* draw lashes */
-            if (i>0 && i<5) GDrawDrawLine(pixmap, pts[i].x,pts[i].y, .75*w*cos(angle)+x+w/2, .75*h*sin(angle)+y+h/4, fg);
-            ++i;
+            if (i>0 && i<6) GDrawDrawLine(pixmap, pts[i].x,pts[i].y, .75*w*cos(angle)+x+w/2, .75*h*sin(angle)+y+h/4, fg);
         }
-        GDrawDrawPoly(pixmap, pts, i, fg);
+        GDrawDrawPoly(pixmap, pts, sizeof(pts)/sizeof(pts[0]), fg);
     }
 
     GDrawPopClip(pixmap,&old2);
@@ -452,7 +454,7 @@ return(false);
 	    event->u.chr.keysym == GK_BackTab || event->u.chr.keysym == GK_Escape )
 return( false );
 
-    if (event->u.chr.chars[0]==' ' ) {
+    if (event->type == et_char && event->u.chr.chars[0]==' ' ) {
 	GRadioChanged(gr);
 	_ggadget_redraw(g);
 return( true );

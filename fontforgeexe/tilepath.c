@@ -24,9 +24,19 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
+#include "fvfonts.h"
+#include "gkeysym.h"
+#include "splinefit.h"
+#include "splinefont.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+
 #include <math.h>
-#include <gkeysym.h>
 
 #ifdef FONTFORGE_CONFIG_TILEPATH
 /* Given a path and a splineset */
@@ -145,7 +155,7 @@ return( false );
 		sx = spline->to->me.x - spline->from->me.x;
 		sy = spline->to->me.y - spline->from->me.y;
 	    }
-	    angle = atan2(sy,sx) - 3.1415926535897932/2;
+	    angle = atan2(sy,sx) - FF_PI/2;
 	    td->samples[i].c = cos(angle);
 	    td->samples[i].s = sin(angle);
 	    if ( td->samples[i].s>-.00001 && td->samples[i].s<.00001 ) { td->samples[i].s=0; td->samples[i].c = ( td->samples[i].c>0 )? 1 : -1; }
@@ -166,7 +176,7 @@ return( false );
 	    /* there are two normals at a join, one for each spline */
 	    /*  it should bisect the normal vectors of the two splines */
 	    sx = next->splines[0].c; sy = next->splines[1].c;
-	    angle = atan2(sy,sx) - 3.1415926535897932/2;
+	    angle = atan2(sy,sx) - FF_PI/2;
 	    td->joins[pcnt].c1 = cos(angle);
 	    td->joins[pcnt].s1 = sin(angle);
 	    if ( td->joins[pcnt].s1>-.00001 && td->joins[pcnt].s1<.00001 ) { td->joins[pcnt].s1=0; td->joins[pcnt].c1 = ( td->joins[pcnt].c1>0 )? 1 : -1; }
@@ -174,7 +184,7 @@ return( false );
 
 	    sx = (3*spline->splines[0].a+2*spline->splines[0].b)+spline->splines[0].c;
 	    sy = (3*spline->splines[1].a+2*spline->splines[1].b)+spline->splines[1].c;
-	    angle = atan2(sy,sx) - 3.1415926535897932/2;
+	    angle = atan2(sy,sx) - FF_PI/2;
 	    td->joins[pcnt].c2 = cos(angle);
 	    td->joins[pcnt].s2 = sin(angle);
 	    if ( td->joins[pcnt].s2>-.00001 && td->joins[pcnt].s2<.00001 ) { td->joins[pcnt].s2=0; td->joins[pcnt].c2 = ( td->joins[pcnt].c2>0 )? 1 : -1; }
@@ -525,7 +535,7 @@ static void TileLine(TD *td) {
     }
 }
 
-static void AdjustPoint(TD *td,Spline *spline,bigreal t,TPoint *to) {
+static void AdjustPoint(TD *td,Spline *spline,bigreal t, FitPoint *to) {
     bigreal x, y;
     bigreal pos;
     int low;
@@ -553,19 +563,19 @@ static void AdjustPoint(TD *td,Spline *spline,bigreal t,TPoint *to) {
 	dy2 = td->joins[i].c2;
 	/* there are two lines at a join and I need to find the intersection */
 	if ( dy2>-.00001 && dy2<.00001 ) {
-	    to->y = y2;
+	    to->p.y = y2;
 	    if ( dy1>-.00001 && dy1<.00001 )	/* essentially parallel */
-		to->x = x2;
+		to->p.x = x2;
 	    else
-		to->x = x1 + dx1*(y2-y1)/dy1;
+		to->p.x = x1 + dx1*(y2-y1)/dy1;
 	} else {
 	    bigreal s=(dy1*dx2/dy2-dx1);
 	    if ( s>-.00001 && s<.00001 ) {	/* essentially parallel */
-		to->x = x1; to->y = y1;
+		to->p.x = x1; to->p.y = y1;
 	    } else {
 		bigreal t1 = (x1-x2- dx2/dy2*(y1-y2))/s;
-		to->x = x1 + dx1*t1;
-		to->y = y1 + dy1*t1;
+		to->p.x = x1 + dx1*t1;
+		to->p.y = y1 + dy1*t1;
 	    }
 	}
     } else {
@@ -589,18 +599,18 @@ static void AdjustPoint(TD *td,Spline *spline,bigreal t,TPoint *to) {
 	    s = (td->samples[low].s*(1-pos) + td->samples[low+1].s*pos);
 	}
 
-	to->x = dx + c*x;
-	to->y = dy + s*x;
+	to->p.x = dx + c*x;
+	to->p.y = dy + s*x;
     }
 }
 
 static SplinePoint *TDMakePoint(TD *td,Spline *old,real t) {
-    TPoint tp;
+    FitPoint fp;
     SplinePoint *new;
 
-    AdjustPoint(td,old,t,&tp);
+    AdjustPoint(td,old,t,&fp);
     new = chunkalloc(sizeof(SplinePoint));
-    new->me.x = tp.x; new->me.y = tp.y;
+    new->me.x = fp.p.x; new->me.y = fp.p.y;
     new->nextcp = new->me;
     new->prevcp = new->me;
     new->nonextcp = new->noprevcp = true;
@@ -610,7 +620,7 @@ return( new );
 
 static Spline *AdjustSpline(TD *td,Spline *old,SplinePoint *newfrom,SplinePoint *newto,
 	int order2) {
-    TPoint tps[15];
+    FitPoint fps[15];
     int i;
     bigreal t;
 
@@ -619,8 +629,8 @@ static Spline *AdjustSpline(TD *td,Spline *old,SplinePoint *newfrom,SplinePoint 
     if ( newto==NULL )
 	newto = TDMakePoint(td,old,1);
     for ( i=1, t=1/16.0; i<16; ++i, t+= 1/16.0 )
-	AdjustPoint(td,old,t,&tps[i-1]);
-return( ApproximateSplineFromPoints(newfrom,newto,tps,15, order2) );
+	AdjustPoint(td,old,t,&fps[i-1]);
+return( ApproximateSplineFromPoints(newfrom,newto,fps,15, order2) );
 }
 
 static void AdjustSplineSet(TD *td,int order2) {
@@ -1109,13 +1119,13 @@ static int TileAsk(struct tiledata *td,SplineFont *sf) {
 	chvarray[1][i] = &gcd[k-1];
 
 	gcd[k].gd.pos.x = gcd[0].gd.pos.x; gcd[k].gd.pos.y = gcd[6].gd.pos.y+24;
-	gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	gcd[k].gd.flags = gg_visible | gg_enabled;
 	if ( include_whitespace[i] ) gcd[k].gd.flags |= gg_cb_on;
 	label[k].text = (unichar_t *) _("Include Whitespace below Tile");
 	label[k].text_is_1byte = true;
 	label[k].text_in_resource = true;
 	gcd[k].gd.label = &label[k];
-	gcd[k].gd.popup_msg = (unichar_t *) _("Normally the Tile will consist of everything\nwithin the minimum bounding box of the tile --\nso adjacent tiles will abut directly on one\nanother. If you wish whitespace between tiles\nset this flag");
+	gcd[k].gd.popup_msg = _("Normally the Tile will consist of everything\nwithin the minimum bounding box of the tile --\nso adjacent tiles will abut directly on one\nanother. If you wish whitespace between tiles\nset this flag");
 	gcd[k].gd.cid = CID_IncludeWhiteSpaceBelowTile+i;
 	gcd[k++].creator = GCheckBoxCreate;
 	chvarray[2][i] = &gcd[k-1];
@@ -1123,37 +1133,37 @@ static int TileAsk(struct tiledata *td,SplineFont *sf) {
     chvarray[0][4] = chvarray[1][4] = chvarray[2][4] = chvarray[3][0] = NULL;
 
     gcd[k].gd.pos.x = 6; gcd[k].gd.pos.y = 6;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gcd[k].gd.flags = gg_visible | gg_enabled;
     gcd[k].gd.mnemonic = 'L';
     label[k].text = (unichar_t *) _("_Left");
     label[k].text_is_1byte = true;
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.popup_msg = (unichar_t *) _("The tiles should be placed to the left of the path\nas the path is traced from its start point to its end");
+    gcd[k].gd.popup_msg = _("The tiles should be placed to the left of the path\nas the path is traced from its start point to its end");
     gcd[k].gd.cid = CID_Left;
     gcd[k++].creator = GRadioCreate;
     rhvarray[0][0] = &gcd[k-1];
 
     gcd[k].gd.pos.x = 60; gcd[k].gd.pos.y = gcd[0].gd.pos.y;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gcd[k].gd.flags = gg_visible | gg_enabled;
     gcd[k].gd.mnemonic = 'C';
     label[k].text = (unichar_t *) _("C_enter");
     label[k].text_is_1byte = true;
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.popup_msg = (unichar_t *) _("The tiles should be centered on the path");
+    gcd[k].gd.popup_msg = _("The tiles should be centered on the path");
     gcd[k].gd.cid = CID_Center;
     gcd[k++].creator = GRadioCreate;
     rhvarray[0][1] = &gcd[k-1];
 
     gcd[k].gd.pos.x = 140; gcd[k].gd.pos.y = gcd[1].gd.pos.y;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gcd[k].gd.flags = gg_visible | gg_enabled;
     gcd[k].gd.mnemonic = 'R';
     label[k].text = (unichar_t *) _("_Right");
     label[k].text_is_1byte = true;
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.popup_msg = (unichar_t *) _("The tiles should be placed to the right of the path\nas the path is traced from its start point to its end");
+    gcd[k].gd.popup_msg = _("The tiles should be placed to the right of the path\nas the path is traced from its start point to its end");
     gcd[k].gd.cid = CID_Right;
     gcd[k++].creator = GRadioCreate;
     rhvarray[0][2] = &gcd[k-1];
@@ -1168,37 +1178,37 @@ static int TileAsk(struct tiledata *td,SplineFont *sf) {
     rhvarray[1][3] = GCD_Glue; rhvarray[1][4] = NULL;
 
     gcd[k].gd.pos.x = gcd[0].gd.pos.x; gcd[k].gd.pos.y = gcd[2].gd.pos.y+24;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gcd[k].gd.flags = gg_visible | gg_enabled;
     gcd[k].gd.mnemonic = 'T';
     label[k].text = (unichar_t *) _("_Tile");
     label[k].text_is_1byte = true;
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.popup_msg = (unichar_t *) _("Multiple copies of the selection should be tiled onto the path");
+    gcd[k].gd.popup_msg = _("Multiple copies of the selection should be tiled onto the path");
     gcd[k].gd.cid = CID_Tile;
     gcd[k++].creator = GRadioCreate;
     rhvarray[2][0] = &gcd[k-1];
 
     gcd[k].gd.pos.x = gcd[1].gd.pos.x; gcd[k].gd.pos.y = gcd[4].gd.pos.y;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gcd[k].gd.flags = gg_visible | gg_enabled;
     gcd[k].gd.mnemonic = 'a';
     label[k].text = (unichar_t *) _("Sc_ale & Tile");
     label[k].text_is_1byte = true;
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.popup_msg = (unichar_t *) _("An integral number of the selection will be used to cover the path.\nIf the path length is not evenly divisible by the selection's\nheight, then the selection should be scaled slightly.");
+    gcd[k].gd.popup_msg = _("An integral number of the selection will be used to cover the path.\nIf the path length is not evenly divisible by the selection's\nheight, then the selection should be scaled slightly.");
     gcd[k].gd.cid = CID_TileScale;
     gcd[k++].creator = GRadioCreate;
     rhvarray[2][1] = &gcd[k-1];
 
     gcd[k].gd.pos.x = gcd[2].gd.pos.x; gcd[k].gd.pos.y = gcd[5].gd.pos.y;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+    gcd[k].gd.flags = gg_visible | gg_enabled;
     gcd[k].gd.mnemonic = 'S';
     label[k].text = (unichar_t *) _("_Scale");
     label[k].text_is_1byte = true;
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.popup_msg = (unichar_t *) _("The selection should be scaled so that it will cover the path's length");
+    gcd[k].gd.popup_msg = _("The selection should be scaled so that it will cover the path's length");
     gcd[k].gd.cid = CID_Scale;
     gcd[k++].creator = GRadioCreate;
     rhvarray[2][2] = &gcd[k-1];

@@ -25,20 +25,36 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "print.h"
+
+#include "cvexport.h"
+#include "dumppfa.h"
+#include "ffglib.h"
 #include "fontforgevw.h"
+#include "fvfonts.h"
+#include "gfile.h"
+#include "gutils.h"
+#include "langfreq.h"
+#include "mm.h"
+#include "psread.h"
 #include "sflayoutP.h"
-#include <stdlib.h>
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "tottf.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
+#include <stdlib.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <ustring.h>
-#include <ffglib.h>
-#include "utype.h"
-#include <sys/types.h>
 #if !defined(__MINGW32__)
 #include <sys/wait.h>
 #endif
-#include "print.h"
 
 int pagewidth = 0, pageheight=0;	/* In points */
 char *printlazyprinter=NULL;
@@ -393,8 +409,8 @@ static void pdf_dump_type1(PI *pi,int sfid) {
 
     fd_obj = figure_fontdesc(pi, sfid, &fd,1,font_stream);
 
-    sfbit->our_font_objs = malloc((sfbit->map->enccount/256+1)*sizeof(int *));
-    sfbit->fonts = malloc((sfbit->map->enccount/256+1)*sizeof(int *));
+    sfbit->our_font_objs = malloc((sfbit->map->enccount/256+1)*sizeof(int));
+    sfbit->fonts = malloc((sfbit->map->enccount/256+1)*sizeof(int));
     for ( i=0; i<sfbit->map->enccount; i += 256 ) {
 	sfbit->fonts[i/256] = -1;
 	dump_pfb_encoding(pi,sfid,i,fd_obj);
@@ -1125,7 +1141,8 @@ static void pdf_build_type0(PI *pi, int sfid) {
 static void dump_pdfprologue(PI *pi) {
 /* TODO: Note, maybe this routine can be combined somehow with cvexports.c _ExportPDF() */
     time_t now;
-    struct tm *tm;
+    GDateTime *gdt;
+    GTimeSpan zoffset;
     const char *author = GetAuthor();
     int sfid;
 
@@ -1144,23 +1161,28 @@ static void dump_pdfprologue(PI *pi) {
 	fprintf( pi->out, "  /Title (Character Displays from %s)\n", pi->mainsf->fullname );
     fprintf( pi->out, "  /Creator (FontForge)\n" );
     fprintf( pi->out, "  /Producer (FontForge)\n" );
-    time(&now);
-    tm = localtime(&now);
+    now = GetTime();
+    if (!getenv("SOURCE_DATE_EPOCH")) {
+	gdt = g_date_time_new_from_unix_local((gint64)now);
+    } else {
+	gdt = g_date_time_new_from_unix_utc((gint64)now);
+    }
     fprintf( pi->out, "    /CreationDate (D:%04d%02d%02d%02d%02d%02d",
-	    tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec );
-#ifdef _NO_TZSET
-    fprintf( pi->out, "Z)\n" );
-#else
-    if ( timezone==0 )
+	    g_date_time_get_year(gdt), g_date_time_get_month(gdt), g_date_time_get_day_of_month(gdt),
+	    g_date_time_get_hour(gdt), g_date_time_get_minute(gdt), g_date_time_get_second(gdt) );
+    zoffset = g_date_time_get_utc_offset(gdt)/1000000;
+    if ( zoffset==0 || getenv("SOURCE_DATE_EPOCH") )
 	fprintf( pi->out, "Z)\n" );
     else {
-	if ( timezone<0 ) /* fprintf bug - this is a kludge to print +/- in front of a %02d-padded value */
+	if ( zoffset<0 ) { /* fprintf bug - this is a kludge to print +/- in front of a %02d-padded value */
 	    fprintf( pi->out, "-" );
-	else
+	    zoffset *= -1;
+	} else
 	    fprintf( pi->out, "+" );
-	fprintf( pi->out, "%02d'%02d')\n", (int)(timezone/3600),(int)(timezone/60-(timezone/3600)*60) );
+	fprintf( pi->out, "%02d'%02d')\n", (int)(zoffset/3600),(int)(zoffset/60-(zoffset/3600)*60) );
     }
-#endif
+    g_date_time_unref(gdt);
+    gdt = NULL;
     if ( author!=NULL )
 	fprintf( pi->out, "  /Author (%s)\n", author );
     fprintf( pi->out, ">>\n" );
@@ -1358,7 +1380,7 @@ return;
     fprintf( pi->out, "%%!PS-Adobe-3.0\n" );
     fprintf( pi->out, "%%%%BoundingBox: 20 20 %d %d\n", pi->pagewidth-30, pi->pageheight-20 );
     fprintf( pi->out, "%%%%Creator: FontForge\n" );
-    time(&now);
+    now = GetTime();
     fprintf( pi->out, "%%%%CreationDate: %s", ctime(&now) );
     fprintf( pi->out, "%%%%DocumentData: Binary\n" );
     if ( author!=NULL )
@@ -1494,7 +1516,7 @@ static int PIDownloadFont(PI *pi, SplineFont *sf, EncMap *map) {
     if ( pi->pointsize==0 )
 	pi->pointsize = sfbit->iscid && !sfbit->istype42cid?18:20;		/* 18 fits 20 across, 20 fits 16 */
 
-    sfbit->fontfile = tmpfile();
+    sfbit->fontfile = GFileTmpfile();
     if ( sfbit->fontfile==NULL ) {
 	ff_post_error(_("Failed to open temporary output file"),_("Failed to open temporary output file"));
 return(false);
@@ -2632,9 +2654,9 @@ return;
 	simple_pos = 8;
     else if ( strcmp(langbuf,"pl")==0 )
 	simple_pos = 9;
-    else if ( strcmp(langbuf,"pl")==0 )
+    else if ( strcmp(langbuf,"sl")==0 )
 	simple_pos = 10;
-    else if ( strcmp(langbuf,"cz")==0 )
+    else if ( strcmp(langbuf,"cs")==0 )
 	simple_pos = 11;
     else
 	simple_pos = rand()&3;
@@ -2752,7 +2774,7 @@ unichar_t *PrtBuildDef( SplineFont *sf, void *tf,
 	rcnt = 0;
 	for ( s=0; s<therecnt; ++s ) if ( !ScriptInList(scriptsthere[s],scriptsdone,scnt)) {
 	    if ( ret ) {
-		if ( randoms[rcnt]!='\0' ) {
+		if ( randoms[rcnt]!=NULL ) {
 		    utf82u_strcpy(ret+len,randoms[rcnt]);
 		    len += u_strlen(ret+len);
 		    ret[len++] = '\n';
@@ -2761,6 +2783,7 @@ unichar_t *PrtBuildDef( SplineFont *sf, void *tf,
 			(langsyscallback)(tf,len,scriptsthere[s],langs[rcnt]);
 		}
 		free(randoms[rcnt]);
+		randoms[rcnt] = NULL;
 	    } else {
 		randoms[rcnt] = RandomParaFromScript(scriptsthere[s],&langs[rcnt],sf);
 		for ( pt=randoms[rcnt]; *pt==' '; ++pt );
@@ -3076,7 +3099,7 @@ return;
 	}
     } else {
 	outputfile = NULL;
-	pi.out = tmpfile();
+	pi.out = GFileTmpfile();
 	if ( pi.out==NULL ) {
 	    ff_post_error(_("Failed to open temporary output file"),_("Failed to open temporary output file"));
 return;

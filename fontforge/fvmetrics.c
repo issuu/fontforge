@@ -24,10 +24,19 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <math.h>
-#include <ustring.h>
+
+#include <fontforge-config.h>
+
 #include "fvmetrics.h"
+
+#include "bitmapchar.h"
+#include "bvedit.h"
+#include "cvundoes.h"
+#include "fontforgevw.h"
+#include "splineutil.h"
+#include "ustring.h"
+
+#include <math.h>
 
 static void DoChar(SplineChar *sc,CreateWidthData *wd, FontViewBase *fv,
 	BDFChar *bc) {

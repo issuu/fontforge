@@ -24,11 +24,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <ustring.h>
-#include <utype.h>
-#include "ttf.h"
+
+#include <fontforge-config.h>
+
 #include "ttfinstrs.h"
+
+#include "fontforgevw.h"
+#include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
 
 const char *ff_ttf_instrnames[] = {
     "SVTCA[y-axis]",
@@ -307,6 +311,7 @@ uint8 *_IVParse(SplineFont *sf, char *text, int *len,
 		val = strtol(pt,&end,0);
 		if ( val>32767 || val<-32768 ) {
 		    IVError(iv,_("A value must be between [-32768,32767]"),pt-text);
+                    free(instrs);
 return( NULL );
 		}
 
@@ -315,6 +320,7 @@ return( NULL );
 		if ( *pt == '@' ) { /* a delta control byte */
 		    if ( val>8 || val<-8 || val==0 ) {
 			IVError(iv,_("A value must be between [-8,-1] or [1,8]"),pt-text);
+                        free(instrs);
 return( NULL );
 		    }
 
@@ -322,6 +328,7 @@ return( NULL );
 
 		    if ( !isdigit( *pt ) ) {
 			IVError(iv,_("Number expected"),pt-text);
+                        free(instrs);
 return( NULL );
 		    }
 
@@ -330,6 +337,7 @@ return( NULL );
 
 		    if ( val>15 || val<0 ) {
 			IVError(iv,_("A value must be between [0,15]"),pt-text);
+                        free(instrs);
 return( NULL );
 		    }
 
@@ -346,6 +354,7 @@ return( NULL );
 		while ( *pt==' ' || *pt=='\t' ) ++pt;
 		if ( *pt!='(' ) {
 		    IVError(iv,_("Missing left parenthesis in command to get a cvt index"),pt-text);
+                    free(instrs);
 return( NULL );
 		}
 		temp = strtol(pt+1,&end,0);
@@ -353,6 +362,7 @@ return( NULL );
 		while ( *pt==' ' || *pt=='\t' ) ++pt;
 		if ( *pt!=')' ) {
 		    IVError(iv,_("Missing right paren in command to get a cvt index"),pt-text);
+                    free(instrs);
 return( NULL );
 		}
 		numberstack[npos++] = TTF__getcvtval(sf,temp);
@@ -370,6 +380,7 @@ return( NULL );
 		IVError(iv,_("Expected a number for a push count"),pt-text);
 	    else if ( numberstack[0]>255 || numberstack[0]<=0 ) {
 		IVError(iv,_("The push count must be a number between 0 and 255"),pt-text);
+                free(instrs);
 return( NULL );
 	    } else {
 		nread = 1;
@@ -379,6 +390,7 @@ return( NULL );
 	}
 	if ( push_left!=0 && push_left<npos-nread && (*pt=='\r' || *pt=='\n' || *pt=='\0') ) {
 	    IVError(iv,_("More pushes specified than needed"),pt-text);
+            free(instrs);
 return( NULL );
 	}
 	while ( push_left>0 && nread<npos ) {
@@ -387,6 +399,7 @@ return( NULL );
 		instrs[icnt++] = numberstack[nread++]&0xff;
 	    } else if ( numberstack[0]>255 || numberstack[0]<0 ) {
 		IVError(iv,_("A value to be pushed by a byte push must be between 0 and 255"),pt-text);
+                free(instrs);
 return( NULL );
 	    } else
 		instrs[icnt++] = numberstack[nread++];
@@ -394,12 +407,14 @@ return( NULL );
 	}
 	if ( nread<npos && push_left==0 && (*pt=='\r' || *pt=='\n' || *pt=='\0')) {
 	    IVError(iv,_("Unexpected number"),pt-text);
+            free(instrs);
 return( NULL );
 	}
 	if ( *pt=='\r' || *pt=='\n' || *pt=='\0' )
     continue;
 	if ( push_left>0 ) {
 	    IVError(iv,_("Missing pushes"),pt-text);
+            free(instrs);
 return( NULL );
 	}
 	while ( nread<npos ) {
@@ -444,10 +459,12 @@ return( NULL );
 	    while ( *bend==' ' || *bend=='\t' ) ++bend;
 	    if ( *bend!=']' ) {
 		IVError(iv,_("Missing right bracket in command (or bad binary value in bracket)"),pt-text);
+                free(instrs);
 return( NULL );
 	    }
 	    if ( val>=32 ) {
 		IVError(iv,_("Bracketted value is too large"),pt-text);
+                free(instrs);
 return( NULL );
 	    }
 	    i += val;

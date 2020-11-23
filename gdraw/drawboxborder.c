@@ -24,10 +24,14 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <math.h>
-#include <gdraw.h>
-#include <ggadget.h>
+
+#include <fontforge-config.h>
+
+#include "gdraw.h"
+#include "ggadget.h"
 #include "ggadgetP.h"
+
+#include <math.h>
 
 static void FigureBorderCols(GBox *design, Color *cols) {
     if ( design->border_type==bt_box || design->border_type==bt_double ) {

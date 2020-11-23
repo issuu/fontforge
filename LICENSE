@@ -6,8 +6,8 @@ However, almost all of its parts are available under the "revised BSD license" (
 
 The Revised BSD License is very permissive, and allows for code to be combined with other code under other licenses. 
 There are many useful libraries available under copyleft libre licenses, such as the LGPL and GPL, which FontForge started to use in 2012. 
-For example, Pango and Cairo are available under the LGPL, and gnulib is available under the GPL.
-Advanced features added since 2012 are licensed by their individual developers under the GPLv3.
+For example, Pango and Cairo are available under the LGPL.
+Some features added since 2012 are licensed by their individual developers under the GPLv3.
 
 ## How To License Contributions
 
@@ -125,8 +125,8 @@ displayfonts.c		parsettfatt.c		ttf.h
 dumpbdf.c		parsettfbmf.c		ttfinstrs.c
 dumppfa.c		parsettfvar.c		ttfinstrs.h
 edgelist.h		PfEd.h			ttfinstrsui.c
-edgelist2.h		plugins.c		ttfspecial.c
-effects.c		plugins.h		ufo.c
+edgelist2.h		ttfspecial.c
+effects.c		ufo.c
 effectsui.c		prefs.c			uiinterface.h
 encoding.c		print.c			uiutil.c
 encodingui.c		print.h			unicoderange.c
@@ -186,7 +186,7 @@ excepthook.py
 
 fontforge-20120731-b/Unicode:
 char.c		makebuildtables.c	ucharmap.c
-dump.c		makeutype.c		usprintf.c
+dump.c		makeutype.c
 gwwiconv.c	memory.c		ustring.c
 ```
 

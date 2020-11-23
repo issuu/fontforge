@@ -24,11 +24,17 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "asmfpst.h"
+#include "chardata.h"
 #include "fontforgeui.h"
-#include <chardata.h>
-#include <utype.h>
-#include <ustring.h>
-#include <gkeysym.h>
+#include "gkeysym.h"
+#include "lookups.h"
+#include "splineutil.h"
+#include "ustring.h"
+#include "utype.h"
 
 /* Currently uses class numbers rather than names!!!!!! */
 
@@ -1178,6 +1184,8 @@ return;
 			ff_post_error(_("Bad Coverage Table"),_("In a Reverse Chaining Substitution there must be exactly one coverage table with replacements"));
 return;
 		    }
+		    /* There is only this one line of replacements to add. */
+		    dummy.u.rcoverage.replacements = GlyphNameListDeUnicode( old[cols*i+1].u.md_str );
 		}
 	    }
 	    if ( first==-1 ) {
@@ -1440,7 +1448,7 @@ return( true );
 static int subccd_e_h(GWindow gw, GEvent *event) {
     if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("contextchain.html");
+	    help("ui/dialogs/contextchain.html", NULL);
 return( true );
 	} else if ( GMenuIsCommand(event,H_("Quit|Ctl+Q") )) {
 	    MenuExit(NULL,NULL,NULL);
@@ -1466,7 +1474,7 @@ static int ccd_e_h(GWindow gw, GEvent *event) {
 	chunkfree(ccd,sizeof(struct contextchaindlg));
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("contextchain.html");
+	    help("ui/dialogs/contextchain.html", NULL);
 return( true );
 	} else if ( GMenuIsCommand(event,H_("Quit|Ctl+Q") )) {
 	    MenuExit(NULL,NULL,NULL);
@@ -1729,7 +1737,7 @@ static void RenameClass(struct contextchaindlg *ccd,char *old,char *new,int sect
     GGadget *gclassrules = GWidgetGetControl(ccd->classes_simple,CID_CList_Simple);
     struct matrix_data *classrules = GMatrixEditGet(gclassrules,&rows);
     int cols = GMatrixEditGetColCnt(gclassrules);
-    char *end_back=NULL, *end_match=NULL, *pt, *last_name, *temp;
+    char *pt, *last_name, *temp;
     int ch;
 
     if ( sections==0x7 ) {
@@ -1742,6 +1750,8 @@ static void RenameClass(struct contextchaindlg *ccd,char *old,char *new,int sect
 	}
     } else {
 	for ( i=0; i<rows; ++i ) {
+	    char *end_back = NULL;
+	    char *end_match = NULL;
 	    char *oldrule = classrules[cols*i+0].u.md_str;
 	    char *newrule;
 	    for ( pt=last_name=oldrule; *pt; ) {
@@ -2405,8 +2415,8 @@ void ContextChainEdit(SplineFont *sf,FPST *fpst,
 	glabel[i][k].text = (unichar_t *) _("Set From Selection");
 	glabel[i][k].text_is_1byte = true;
 	ggcd[i][k].gd.label = &glabel[i][k];
-	ggcd[i][k].gd.popup_msg = (unichar_t *) _("Set this glyph list from a selection.");
-	ggcd[i][k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+	ggcd[i][k].gd.popup_msg = _("Set this glyph list from a selection.");
+	ggcd[i][k].gd.flags = gg_visible | gg_enabled;
 	ggcd[i][k].gd.handle_controlevent = CCD_FromSelection;
 	ggcd[i][k].data=(void *)((intpt)CID_GlyphList+(0*100+i*20));
 	ggcd[i][k++].creator = GButtonCreate;
@@ -2580,8 +2590,8 @@ void ContextChainEdit(SplineFont *sf,FPST *fpst,
 		clabel[i][k].text = (unichar_t *) _("Set From Selection");
 		clabel[i][k].text_is_1byte = true;
 		cgcd[i][k].gd.label = &clabel[i][k];
-		cgcd[i][k].gd.popup_msg = (unichar_t *) _("Set this glyph list from a selection.");
-		cgcd[i][k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
+		cgcd[i][k].gd.popup_msg = _("Set this glyph list from a selection.");
+		cgcd[i][k].gd.flags = gg_visible | gg_enabled;
 		cgcd[i][k].gd.handle_controlevent = CCD_FromSelection;
 		cgcd[i][k].data = (void *) (intpt) (CID_RplList+100);
 		cgcd[i][k++].creator = GButtonCreate;

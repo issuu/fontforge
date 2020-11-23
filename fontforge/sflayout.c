@@ -26,15 +26,26 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
+#include "bvedit.h"
+#include "chardata.h"
+#include "encoding.h"
+#include "ffglib.h"
 #include "fontforgevw.h"
-#include <math.h>
-
+#include "fvfonts.h"
+#include "lookups.h"
+#include "scripting.h"
 #include "sflayoutP.h"
+#include "splinefill.h"
+#include "splineorder2.h"
+#include "splineutil.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
 
-#include <ustring.h>
-#include <utype.h>
-#include <chardata.h>
-#include <ffglib.h>
+#include <math.h>
+#include <unistd.h>
 
 static uint32 simple_stdfeatures[] = { CHR('c','c','m','p'), CHR('l','o','c','a'), CHR('k','e','r','n'), CHR('l','i','g','a'), CHR('c','a','l','t'), CHR('m','a','r','k'), CHR('m','k','m','k'), REQUIRED_FEATURE, 0 };
 static uint32 arab_stdfeatures[] = { CHR('c','c','m','p'), CHR('l','o','c','a'), CHR('i','s','o','l'), CHR('i','n','i','t'), CHR('m','e','d','i'),CHR('f','i','n','a'), CHR('r','l','i','g'), CHR('l','i','g','a'), CHR('c','a','l','t'), CHR('k','e','r','n'), CHR('c','u','r','s'), CHR('m','a','r','k'), CHR('m','k','m','k'), REQUIRED_FEATURE, 0 };
@@ -394,7 +405,7 @@ void LayoutInfoRefigureLines(LayoutInfo *li, int start_of_change,
     double scale;
 
     if ( li->lines==NULL ) {
-	li->lines = malloc(10*sizeof(struct opentype_str *));
+	li->lines = malloc(10*sizeof(struct opentype_str **));
 	li->lineheights = malloc(10*sizeof(struct lineheights));
 	li->lines[0] = NULL;
 	li->lmax = 10;
@@ -496,7 +507,7 @@ void LayoutInfoRefigureLines(LayoutInfo *li, int start_of_change,
     li->pcnt += pdiff;
 
     if ( li->lmax <= li->lcnt+lcnt - (le-ls) + 1 ) {
-	li->lines = realloc(li->lines,(li->lmax = li->lcnt+30+lcnt-(le-ls+1))*sizeof(struct openfont_str **));
+	li->lines = realloc(li->lines,(li->lmax = li->lcnt+30+lcnt-(le-ls+1))*sizeof(struct opentype_str **));
 	li->lineheights = realloc(li->lineheights,li->lmax*sizeof(struct lineheights));
     }
     /* move any old lines around */
@@ -1037,7 +1048,7 @@ SplineSet *LIConvertToSplines(LayoutInfo *li,double dpi,int order2) {
 return( head );
 }
 
-#include "scripting.h"
+
 static Array *SFDefaultScriptsLines(Array *arr,SplineFont *sf) {
     int pixelsize=24;
     uint32 scripts[200], script;
@@ -1151,9 +1162,7 @@ static Array *SFDefaultScriptsLines(Array *arr,SplineFont *sf) {
 	  }
       }
 
-      ret = calloc(1,sizeof(Array));
-      ret->argc = 2*lcnt;
-      ret->vals = calloc(2*lcnt,sizeof(Val));
+      ret = arraynew(2 * lcnt);
       for ( i=0; i<lcnt; ++i ) {
 	  ret->vals[2*i+0].type = v_int;
 	  ret->vals[2*i+0].u.ival = pixelsize;
@@ -1279,8 +1288,6 @@ void FontImage(SplineFont *sf,char *filename,Array *arr,int width,int height) {
 	arrayfree(freeme);
 }
 
-#include <stdlib.h>
-#include <unistd.h>
 char *SFDefaultImage(SplineFont *sf,char *filename) {
 
     if ( filename==NULL ) {

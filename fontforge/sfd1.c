@@ -25,8 +25,15 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "fontforge.h"
+#include <fontforge-config.h>
+
 #include "sfd1.h"
+
+#include "fontforge.h"
+#include "fvfonts.h"
+#include "lookups.h"
+#include "tottfgpos.h"
+
 #include <string.h>
 
 /* This file contains the routines needed to process an old style sfd file and*/
@@ -667,7 +674,7 @@ void SFD_AssignLookups(SplineFont1 *sf) {
 
     /* Fix up some gunk from really old versions of the sfd format */
     SFDCleanupAnchorClasses(&sf->sf);
-    if ( sf->sf.uni_interp==ui_unset )
+    if ( sf->sf.uni_interp==ui_unset && sf->sf.map!=NULL )
 	sf->sf.uni_interp = interp_from_encoding(sf->sf.map->enc,ui_none);
 
     /* Fixup for an old bug */

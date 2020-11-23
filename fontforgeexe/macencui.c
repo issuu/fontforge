@@ -25,10 +25,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "fontforgeui.h"
-#include <gkeysym.h>
-#include <ustring.h>
+#include "gkeysym.h"
+#include "macenc.h"
+#include "splineutil.h"
 #include "ttf.h"
+#include "ustring.h"
 
 extern MacFeat *default_mac_feature_map,
 	*builtin_mac_feature_map,
@@ -349,7 +354,7 @@ static int name_e_h(GWindow gw, GEvent *event) {
 	    MacNameListFree(nd->changing);
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("prefs.html#Features");
+	    help("ui/dialogs/prefs.html", "#prefs-features");
 return( true );
 	}
 return( false );
@@ -709,7 +714,7 @@ static int set_e_h(GWindow gw, GEvent *event) {
 	    MacSettingListFree(sd->changing);
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("prefs.html#Settings");
+	    help("ui/dialogs/prefs.html", "#prefs-settings");
 return( true );
 	}
 return( false );
@@ -1008,7 +1013,7 @@ static int feat_e_h(GWindow gw, GEvent *event) {
 	MacNameListFree(GGadgetGetUserData(GWidgetGetControl(fd->gw,CID_NameList)));
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("prefs.html#Features");
+	    help("ui/dialogs/prefs.html", "#prefs-features");
 return( true );
 	}
 return( false );

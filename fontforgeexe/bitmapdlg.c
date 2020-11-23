@@ -24,12 +24,17 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgeui.h"
-#include "gwidget.h"
-#include "ustring.h"
-#include <gkeysym.h>
-#include <math.h>
+
+#include <fontforge-config.h>
+
 #include "bitmapcontrol.h"
+#include "fontforgeui.h"
+#include "gkeysym.h"
+#include "gwidget.h"
+#include "splinefill.h"
+#include "ustring.h"
+
+#include <math.h>
 
 typedef struct createbitmapdlg {
     CreateBitmapData bd;
@@ -242,7 +247,7 @@ static int bd_e_h(GWindow gw, GEvent *event) {
 	bd->done = true;
     } else if ( event->type == et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("elementmenu.html#Bitmaps");
+	    help("ui/menus/elementmenu.html", "#elementmenu-bitmaps");
 return( true );
 	}
 return( false );

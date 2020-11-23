@@ -24,15 +24,29 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforge.h"
-#include <stdio.h>
-#include <math.h>
-#include "splinefont.h"
-#include "views.h"
-#include "stemdb.h"
-#include <utype.h>
-#include <chardata.h>
+
+#include <fontforge-config.h>
+
+#include "autohint.h"
+
+#include "chardata.h"
+#include "cvundoes.h"
+#include "dumppfa.h"
 #include "edgelist.h"
+#include "fontforge.h"
+#include "psread.h"
+#include "splinefill.h"
+#include "splinefont.h"
+#include "splinesave.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "stemdb.h"
+#include "tottfgpos.h"
+#include "utype.h"
+#include "views.h"
+
+#include <math.h>
+#include <stdio.h>
 
 float OpenTypeLoadHintEqualityTolerance = 0.0;
 

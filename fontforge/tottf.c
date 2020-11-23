@@ -24,23 +24,51 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "tottf.h"
+
+#include "autohint.h"
+#include "chardata.h"
+#include "dumpbdf.h"
+#include "dumppfa.h"
+#include "encoding.h"
 #include "fontforge.h"
-#include <math.h>
-#include <unistd.h>
-#include <time.h>
+#include "fvfonts.h"
+#include "gfile.h"
+#include "gutils.h"
+#include "gwidget.h"
+#include "lookups.h"
+#include "macenc.h"
+#include "mem.h"
+#include "mm.h"
+#include "parsepfa.h"
+#include "parsettfbmf.h"
+#include "splinefill.h"
+#include "splineorder2.h"
+#include "splinesave.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottfaat.h"
+#include "tottfgpos.h"
+#include "tottfvar.h"
+#include "ttf.h"
+#include "ttfspecial.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <locale.h>
-#include <utype.h>
-#include <ustring.h>
-#include <chardata.h>
-#include <gwidget.h>
+#include <math.h>
+#include <time.h>
+#include <unistd.h>
 
 #ifdef __CygWin
- #include <sys/types.h>
  #include <sys/stat.h>
+ #include <sys/types.h>
  #include <unistd.h>
 #endif
-
-#include "ttf.h"
 
 char *TTFFoundry=NULL;
 
@@ -360,31 +388,28 @@ const char *ttfstandardnames[258] = {
 "dcroat"
 };
 /* Relates Unicode blocks as in
- 	http://unicode.org/Public/UNIDATA/Blocks.txt
+	http://unicode.org/Public/UNIDATA/Blocks.txt
    to bit positions in the OpenType standard Unicode Character Range
-   field 'ulUnicodeRange'.
-   Note that the OpenType standard specifies bits for a subset
-   of the Unicode blocks.
+   field 'ulUnicodeRange', defined in
+	https://docs.microsoft.com/en-us/typography/opentype/spec/os2#ur
  */
 static int uniranges[][3] = {
-    { 0x20, 0x7e, 0 },		/* Basic Latin */
-    { 0xa0, 0xff, 1 },		/* Latin-1 Supplement */
+    { 0x0, 0x7f, 0 },		/* Basic Latin */
+    { 0x80, 0xff, 1 },		/* Latin-1 Supplement */
     { 0x100, 0x17f, 2 },	/* Latin Extended-A */
     { 0x180, 0x24f, 3 },	/* Latin Extended-B */
     { 0x250, 0x2af, 4 },	/* IPA Extensions */
     { 0x2b0, 0x2ff, 5 },	/* Spacing Modifier Letters */
     { 0x300, 0x36f, 6 },	/* Combining Diacritical Marks */
     { 0x370, 0x3ff, 7 },	/* Greek and Coptic */
-    { 0x400, 0x52f, 9 },	/* Cyrillic / Cyrillic Supplement */
+    { 0x400, 0x52f, 9 },	/* Cyrillic, Cyrillic Supplement */
     { 0x530, 0x58f, 10 },	/* Armenian */
     { 0x590, 0x5ff, 11 },	/* Hebrew */
     { 0x600, 0x6ff, 13 },	/* Arabic */
     { 0x700, 0x74f, 71 },	/* Syriac */
     { 0x750, 0x77f, 13 },	/* Arabic Supplement */
     { 0x780, 0x7bf, 72 },	/* Thaana */
-    { 0x7c0, 0x7ff, 14 },	/* N'Ko */
-    /* { 0x800, 0x83f, ? },	 Samaritan */
-    /* { 0x840, 0x85f, ? },	 Mandaic */
+    { 0x7c0, 0x7ff, 14 },	/* NKo */
     { 0x900, 0x97f, 15 },	/* Devanagari */
     { 0x980, 0x9ff, 16 },	/* Bengali */
     { 0xa00, 0xa7f, 17 },	/* Gurmukhi */
@@ -397,187 +422,123 @@ static int uniranges[][3] = {
     { 0xd80, 0xdff, 73 },	/* Sinhala */
     { 0xe00, 0xe7f, 24 },	/* Thai */
     { 0xe80, 0xeff, 25 },	/* Lao */
-    { 0xf00, 0xfbf, 70 },	/* Tibetan */
+    { 0xf00, 0xfff, 70 },	/* Tibetan */
     { 0x1000, 0x109f, 74 },	/* Myanmar */
     { 0x10a0, 0x10ff, 26 },	/* Georgian */
     { 0x1100, 0x11ff, 28 },	/* Hangul Jamo */
-    { 0x1200, 0x137f, 75 },	/* Ethiopic */
-    { 0x1380, 0x139f, 75 },	/* Ethiopic Supplement */
+    { 0x1200, 0x139f, 75 },	/* Ethiopic, Ethiopic Supplement */
     { 0x13a0, 0x13ff, 76 },	/* Cherokee */
-    { 0x1400, 0x167f, 77 },	/* Unified Canadian Aboriginal Symbols */
+    { 0x1400, 0x167f, 77 },	/* Unified Canadian Aboriginal Syllabics */
     { 0x1680, 0x169f, 78 },	/* Ogham */
     { 0x16a0, 0x16ff, 79 },	/* Runic */
-    { 0x1700, 0x1714, 84 },	/* Tagalog */
-    { 0x1720, 0x1736, 84 },	/* Harunoo */
-    { 0x1740, 0x1753, 84 },	/* Buhid */
-    { 0x1750, 0x1773, 84 },	/* Tagbanwa */
+    { 0x1700, 0x177f, 84 },	/* Tagalog, Hanunoo, Buhid, Tagbanwa */
     { 0x1780, 0x17ff, 80 },	/* Khmer */
     { 0x1800, 0x18af, 81 },	/* Mongolian */
-    { 0x18B0, 0x18f5, 77 },	/* Unified Canadian Aboriginal Symbols Extended */
     { 0x1900, 0x194f, 93 },	/* Limbu */
     { 0x1950, 0x197f, 94 },	/* Tai Le */
-    { 0x1980, 0x19DF, 95 },	/* New Tai Lue */
+    { 0x1980, 0x19df, 95 },	/* New Tai Lue */
     { 0x19e0, 0x19ff, 80 },	/* Khmer Symbols */
-    { 0x1A00, 0x1A1F, 96 },	/* Buginese */
-    { 0x1B00, 0x1B7f, 27 },	/* Balinese */
-    { 0x1B80, 0x1BB9, 112 },	/* Sudanese */
-    /*{ 0x1bc0, 0x1bff, ? },	 Batak */
-    { 0x1C00, 0x1C4F, 113 },	/* Lepcha */
-    { 0x1C50, 0x1C7F, 114 },	/* Ol Chiki */
-    /*{ 0x1cd0, 0x1cff, ? },	 Vedic Extensions */
-    { 0x1d00, 0x1dbf, 4 },	/* Phonetic Extensions & Supplement */
-    { 0x1d80, 0x1dff, 6 },	/* Combining Diacritical Marks Supplement */
+    { 0x1a00, 0x1a1f, 96 },	/* Buginese */
+    { 0x1b00, 0x1b7f, 27 },	/* Balinese */
+    { 0x1b80, 0x1bbf, 112 },	/* Sundanese */
+    { 0x1c00, 0x1c4f, 113 },	/* Lepcha */
+    { 0x1c50, 0x1c7f, 114 },	/* Ol Chiki */
+    { 0x1d00, 0x1dbf, 4 },	/* Phonetic Extensions, Phonetic Extensions Supplement */
+    { 0x1dc0, 0x1dff, 6 },	/* Combining Diacritical Marks Supplement */
     { 0x1e00, 0x1eff, 29 },	/* Latin Extended Additional */
     { 0x1f00, 0x1fff, 30 },	/* Greek Extended */
     { 0x2000, 0x206f, 31 },	/* General Punctuation */
     { 0x2070, 0x209f, 32 },	/* Superscripts and Subscripts */
     { 0x20a0, 0x20cf, 33 },	/* Currency Symbols */
-    { 0x20d0, 0x20ff, 34 },	/* Combining Marks for Symbols */
+    { 0x20d0, 0x20ff, 34 },	/* Combining Diacritical Marks for Symbols */
     { 0x2100, 0x214f, 35 },	/* Letterlike Symbols */
     { 0x2150, 0x218f, 36 },	/* Number Forms */
     { 0x2190, 0x21ff, 37 },	/* Arrows */
     { 0x2200, 0x22ff, 38 },	/* Mathematical Operators */
-    { 0x2300, 0x237f, 39 },	/* Miscellaneous Technical */
+    { 0x2300, 0x23ff, 39 },	/* Miscellaneous Technical */
     { 0x2400, 0x243f, 40 },	/* Control Pictures */
     { 0x2440, 0x245f, 41 },	/* Optical Character Recognition */
     { 0x2460, 0x24ff, 42 },	/* Enclosed Alphanumerics */
     { 0x2500, 0x257f, 43 },	/* Box Drawing */
     { 0x2580, 0x259f, 44 },	/* Block Elements */
     { 0x25a0, 0x25ff, 45 },	/* Geometric Shapes */
-    { 0x2600, 0x267f, 46 },	/* Miscellaneous Symbols */
+    { 0x2600, 0x26ff, 46 },	/* Miscellaneous Symbols */
     { 0x2700, 0x27bf, 47 },	/* Dingbats */
     { 0x27c0, 0x27ef, 38 },	/* Miscellaneous Mathematical Symbols-A */
-    { 0x27f0, 0x27ff, 37 },	/* Supplementary Arrows-A */
+    { 0x27f0, 0x27ff, 37 },	/* Supplemental Arrows-A */
     { 0x2800, 0x28ff, 82 },	/* Braille Patterns */
-    { 0x2900, 0x297f, 37 },	/* Supplementary Arrows-B */
-    { 0x2980, 0x2aff, 38 },	/* Miscellaneous Mathematical Symbols-B /
-				   Supplemental Mathematical Operators */
+    { 0x2900, 0x297f, 37 },	/* Supplemental Arrows-B */
+    { 0x2980, 0x2aff, 38 },	/* Miscellaneous Mathematical Symbols-B, Supplemental Mathematical Operators */
     { 0x2b00, 0x2bff, 37 },	/* Miscellaneous Symbols and Arrows */
-    { 0x2C00, 0x2C5E, 97 },	/* Glagolitic */
+    { 0x2c00, 0x2c5f, 97 },	/* Glagolitic */
     { 0x2c60, 0x2c7f, 29 },	/* Latin Extended-C */
     { 0x2c80, 0x2cff, 8 },	/* Coptic */
-    { 0x2D00, 0x2D25, 26 },	/* Georgian Supplement */
-    { 0x2D30, 0x2D6F, 98 },	/* Tifinagh */
+    { 0x2d00, 0x2d2f, 26 },	/* Georgian Supplement */
+    { 0x2d30, 0x2d7f, 98 },	/* Tifinagh */
     { 0x2d80, 0x2ddf, 75 },	/* Ethiopic Extended */
     { 0x2de0, 0x2dff, 9 },	/* Cyrillic Extended-A */
     { 0x2e00, 0x2e7f, 31 },	/* Supplemental Punctuation */
-    { 0x2e80, 0x2fff, 59 },	/* CJK Radicals Supplement / Kangxi Radicals /
-				   Ideographic Description Characters */
-    { 0x3000, 0x303f, 48 },	/* CJK Symbols and Punctuation */
+    { 0x2e80, 0x2fdf, 59 },	/* CJK Radicals Supplement, Kangxi Radicals */
+    { 0x2ff0, 0x303f, 59 },	/* Ideographic Description Characters, CJK Symbols and Punctuation */
     { 0x3040, 0x309f, 49 },	/* Hiragana */
     { 0x30a0, 0x30ff, 50 },	/* Katakana */
     { 0x3100, 0x312f, 51 },	/* Bopomofo */
     { 0x3130, 0x318f, 52 },	/* Hangul Compatibility Jamo */
     { 0x3190, 0x319f, 59 },	/* Kanbun */
     { 0x31a0, 0x31bf, 51 },	/* Bopomofo Extended */
+    { 0x31c0, 0x31ef, 61 },	/* CJK Strokes */
     { 0x31f0, 0x31ff, 50 },	/* Katakana Phonetic Extensions */
     { 0x3200, 0x32ff, 54 },	/* Enclosed CJK Letters and Months */
-    { 0x3300, 0x33ff, 55 },	/* CJK compatability */
+    { 0x3300, 0x33ff, 55 },	/* CJK Compatibility */
     { 0x3400, 0x4dbf, 59 },	/* CJK Unified Ideographs Extension A */
     { 0x4dc0, 0x4dff, 99 },	/* Yijing Hexagram Symbols */
     { 0x4e00, 0x9fff, 59 },	/* CJK Unified Ideographs */
-    { 0xa000, 0xa4cf, 81 },	/* Yi Syllables / Yi Radicals */
-    /*{ 0xA4d0, 0xA4ff, ? },	 Lisu */
-    { 0xA500, 0xA62b, 12 },	/* Vai */
+    { 0xa000, 0xa4cf, 83 },	/* Yi Syllables, Yi Radicals */
+    { 0xa500, 0xa63f, 12 },	/* Vai */
     { 0xa640, 0xa69f, 9 },	/* Cyrillic Extended-B */
-    /*{ 0xa6a0, 0xa6ff, ? },	 Bamum */
     { 0xa700, 0xa71f, 5 },	/* Modifier Tone Letters */
     { 0xa720, 0xa7ff, 29 },	/* Latin Extended-D */
-    { 0xA800, 0xA82F, 100 },	/* Syloti Nagri */
-    /*{ 0xa830, 0xa83f, ? },	 Common Indic Number Forms */
+    { 0xa800, 0xa82f, 100 },	/* Syloti Nagri */
     { 0xa840, 0xa87f, 53 },	/* Phags-pa */
-    { 0xA880, 0xA8D9, 115 },	/* Saurashtra */
-    /*{ 0xA8E0, 0xA8FF, ? },	 Devanagari Extended */
-    { 0xA900, 0xA92F, 116 },	/* Kayah Li */
-    { 0xA930, 0xA95F, 117 },	/* Rejang */
-    /*{ 0xA960, 0xA97F, 28? },	 Hangul Jamo Extended-A */
-    /*{ 0xA980, 0xA9DF, ? },	 Javanese */
-    { 0xAA00, 0xAA5F, 118 },	/* Cham */
-    /*{ 0xAA60, 0xAA7F, 74? },	 Myanmar Extended-A */
-    /*{ 0xAA80, 0xAADF, ? },	 Tai Viet */
-    /*{ 0xab00, 0xab2f, 75? },	 Ethiopic Extended-A */
-    /*{ 0xabc0, 0xabff, ? },	 Meetei Mayek */
+    { 0xa880, 0xa8df, 115 },	/* Saurashtra */
+    { 0xa900, 0xa92f, 116 },	/* Kayah Li */
+    { 0xa930, 0xa95f, 117 },	/* Rejang */
+    { 0xaa00, 0xaa5f, 118 },	/* Cham */
     { 0xac00, 0xd7af, 56 },	/* Hangul Syllables */
-    { 0xd800, 0xdfff, 57 },	/* Non-Plane 0 */
     { 0xe000, 0xf8ff, 60 },	/* Private Use Area */
-
     { 0xf900, 0xfaff, 61 },	/* CJK Compatibility Ideographs */
-    /* 12 ideographs in The IBM 32 Compatibility Additions are CJK unified
-       ideographs despite their names: see The Unicode Standard 4.0, p.475 */
-    { 0xfa0e, 0xfa0f, 59 },
-    { 0xfa10, 0xfa10, 61 },
-    { 0xfa11, 0xfa11, 59 },
-    { 0xfa12, 0xfa12, 61 },
-    { 0xfa13, 0xfa14, 59 },
-    { 0xfa15, 0xfa1e, 61 },
-    { 0xfa1f, 0xfa1f, 59 },
-    { 0xfa20, 0xfa20, 61 },
-    { 0xfa21, 0xfa21, 59 },
-    { 0xfa22, 0xfa22, 61 },
-    { 0xfa23, 0xfa24, 59 },
-    { 0xfa25, 0xfa26, 61 },
-    { 0xfa27, 0xfa29, 59 },
-    { 0xfa2a, 0xfaff, 61 },	/* CJK Compatibility Ideographs */
-
     { 0xfb00, 0xfb4f, 62 },	/* Alphabetic Presentation Forms */
     { 0xfb50, 0xfdff, 63 },	/* Arabic Presentation Forms-A */
     { 0xfe00, 0xfe0f, 91 },	/* Variation Selectors */
+    { 0xfe10, 0xfe1f, 65 },	/* Vertical Forms */
     { 0xfe20, 0xfe2f, 64 },	/* Combining Half Marks */
     { 0xfe30, 0xfe4f, 65 },	/* CJK Compatibility Forms */
     { 0xfe50, 0xfe6f, 66 },	/* Small Form Variants */
-    { 0xfe70, 0xfeef, 67 },	/* Arabic Presentation Forms-B */
+    { 0xfe70, 0xfeff, 67 },	/* Arabic Presentation Forms-B */
     { 0xff00, 0xffef, 68 },	/* Halfwidth and Fullwidth Forms */
     { 0xfff0, 0xffff, 69 },	/* Specials */
-
-    { 0x10000, 0x1007f, 101 },	/* Linear B Syllabary */
-    { 0x10080, 0x100ff, 101 },	/* Linear B Ideograms */
-    { 0x10100, 0x1013f, 101 },	/* Aegean Numbers */
-    { 0x10140, 0x1018F, 102 },	/* Ancient Greek Numbers */
-    { 0x10190, 0x101CF, 119 },	/* Ancient Symbols */
-    { 0x101D0, 0x101FF, 120 },	/* Phaistos Disc */
-    { 0x102A0, 0x102D0, 121 },	/* Carian */
-    { 0x10280, 0x1029C, 121 },	/* Lycian */
+    { 0x10000, 0x1013f, 101 },	/* Linear B Syllabary, Linear B Ideograms, Aegean Numbers */
+    { 0x10190, 0x101cf, 119 },	/* Ancient Symbols */
+    { 0x101d0, 0x101ff, 120 },	/* Phaistos Disc */
+    { 0x10280, 0x102df, 121 },	/* Lycian, Carian */
     { 0x10300, 0x1032f, 85 },	/* Old Italic */
     { 0x10330, 0x1034f, 86 },	/* Gothic */
-    { 0x10380, 0x1039F, 103 },	/* Ugaritic */
-    { 0x103A0, 0x103D6, 104 },	/* Old Persian */
+    { 0x10380, 0x1039f, 103 },	/* Ugaritic */
+    { 0x103a0, 0x103df, 104 },	/* Old Persian */
     { 0x10400, 0x1044f, 87 },	/* Deseret */
     { 0x10450, 0x1047f, 105 },	/* Shavian */
     { 0x10480, 0x104af, 106 },	/* Osmanya */
     { 0x10800, 0x1083f, 107 },	/* Cypriot Syllabary */
-    /*{ 0x10840, 0x1085f, ? },	 Imperial Aramaic */
     { 0x10900, 0x1091f, 58 },	/* Phoenician */
-    { 0x10920, 0x10939, 121 },	/* Lydian */
-    { 0x10A00, 0x10A5F, 108 },	/* Kharoshthi */
-    /*{ 0x10A60, 0x10A7F, ? },	 Old South Arabian */
-    /*{ 0x10B00, 0x10B3F, ? },	 Avestan */
-    /*{ 0x10B40, 0x10B5F, ? },	 Inscriptional Parthian */
-    /*{ 0x10B60, 0x10B7F, ? },	 Inscriptional Pahlavi */
-    /*{ 0x10C00, 0x10C4F, ? },	 Old Turkic */
-    /*{ 0x10E60, 0x10E7F, ? },	 Rumi Numeral Symbols */
-    /*{ 0x11000, 0x1107F, ? },	 Brahmi */
-    /*{ 0x11000, 0x1107F, ? },	 Kaithi */
-    { 0x12000, 0x1247F, 110 },	/* Cuneiform; Numbers & Punctuation */
-    /*{ 0x13000, 0x1342F, ? },	 Egyptian Hieroglyphs */
-    /*{ 0x16800, 0x16A3F, ? },	 Bamum Supplement */
-    /*{ 0x1B000, 0x1B0FF, ? },	 Kana Supplement */
-    { 0x1d000, 0x1d1ff, 88 },	/* Byzantine Musical Symbols / Musical Symbols */
-    /*{ 0x1D200, 0x1D24F, ? },	 Ancient Greek Musical Notation */
+    { 0x10920, 0x1093f, 121 },	/* Lydian */
+    { 0x10a00, 0x10a5f, 108 },	/* Kharoshthi */
+    { 0x12000, 0x1247f, 110 },	/* Cuneiform, Cuneiform Numbers and Punctuation */
+    { 0x1d000, 0x1d24f, 88 },	/* Byzantine Musical Symbols, Musical Symbols, Ancient Greek Musical Notation */
     { 0x1d300, 0x1d35f, 109 },	/* Tai Xuan Jing Symbols */
-    { 0x1D360, 0x1D37F, 111 },	/* Counting Rod Numerals */
+    { 0x1d360, 0x1d37f, 111 },	/* Counting Rod Numerals */
     { 0x1d400, 0x1d7ff, 89 },	/* Mathematical Alphanumeric Symbols */
-    { 0x1F000, 0x1F02B, 122 },	/* Mahjong Tiles */
-    { 0x1F030, 0x1F093, 122 },	/* Dominos */
-    /*{ 0x1F0A0, 0x1F0FF, ? },	 Playing Cards */
-    /*{ 0x1F100, 0x1F1FF, ? },	 Enclosed Alphanumeric Supplement */
-    /*{ 0x1F200, 0x1F2FF, ? },	 Enclosed Ideographic Supplement */
-    /*{ 0x1F300, 0x1F5FF, ? },	 Miscellaneous Symbols And Pictographs */
-    /*{ 0x1F600, 0x1F64F, ? },	 Emoticons */
-    /*{ 0x1F680, 0x1F6FF, ? },	 Transport And Map Symbols */
-    /*{ 0x1F700, 0x1F77F, ? },	 Alchemical Symbols */
+    { 0x1f000, 0x1f09f, 122 },	/* Mahjong Tiles, Domino Tiles */
     { 0x20000, 0x2a6df, 59 },	/* CJK Unified Ideographs Extension B */
-    /*{ 0x2A700, 0x2B73F, 59? },	CJK Unified Ideographs Extension C */
-    /*{ 0x2B740, 0x2B81F, 59? },	CJK Unified Ideographs Extension D */
     { 0x2f800, 0x2fa1f, 61 },	/* CJK Compatibility Ideographs Supplement */
     { 0xe0000, 0xe007f, 92 },	/* Tags */
     { 0xe0100, 0xe01ef, 91 },	/* Variation Selectors Supplement */
@@ -1039,7 +1000,7 @@ static void dumpmissingglyph(SplineFont *sf,struct glyphinfo *gi,int fixedwidth)
     putshort(gi->hmtx,stem);
     if ( sf->hasvmetrics ) {
 	putshort(gi->vmtx,sf->ascent+sf->descent);
-	putshort(gi->vmtx,/*sf->vertical_origin-*/gh.ymax);
+	putshort(gi->vmtx,sf->ascent - gh.ymax);
     }
 }
 
@@ -1419,7 +1380,12 @@ static int AssignTTFBitGlyph(struct glyphinfo *gi,SplineFont *sf,EncMap *map,int
 	for ( j=0; bsizes[j]!=0 && ((bsizes[j]&0xffff)!=bdf->pixelsize || (bsizes[j]>>16)!=BDFDepth(bdf)); ++j );
 	if ( bsizes[j]==0 )
     continue;
-	for ( i=0; i<bdf->glyphcnt; ++i ) if ( !IsntBDFChar(bdf->glyphs[i]) )
+	/* 
+	 * All ttf_glyphs are -1, unless they have been set by
+	 * AssignNotdefNull. If already set by AssignNotdefNull, then
+	 * do not overwrite that.
+	 */
+	for ( i=0; i<bdf->glyphcnt; ++i ) if ( !IsntBDFChar(bdf->glyphs[i]) && sf->glyphs[i]->ttf_glyph==-1 )
 	    sf->glyphs[i]->ttf_glyph = -2;
     }
 
@@ -1489,10 +1455,10 @@ static int dumpglyphs(SplineFont *sf,struct glyphinfo *gi) {
     gi->pointcounts = malloc((gi->maxp->numGlyphs+1)*sizeof(int32));
     memset(gi->pointcounts,-1,(gi->maxp->numGlyphs+1)*sizeof(int32));
     gi->next_glyph = 0;
-    gi->glyphs = tmpfile();
-    gi->hmtx = tmpfile();
+    gi->glyphs = GFileTmpfile();
+    gi->hmtx = GFileTmpfile();
     if ( sf->hasvmetrics )
-	gi->vmtx = tmpfile();
+	gi->vmtx = GFileTmpfile();
     FigureFullMetricsEnd(sf,gi,true);
 
     if ( fixed>0 ) {
@@ -1559,7 +1525,7 @@ return( true );
 
 /* Generate a null glyph and loca table for X opentype bitmaps */
 static int dumpnoglyphs(struct glyphinfo *gi) {
-    gi->glyphs = tmpfile();
+    gi->glyphs = GFileTmpfile();
     gi->glyph_len = 0;
     /* loca gets built in dummyloca */
 return( true );
@@ -1581,7 +1547,7 @@ return( i );
     pos = ftell(at->sidf)+1;
     if ( pos>=65536 && !at->sidlongoffset ) {
 	at->sidlongoffset = true;
-	news = tmpfile();
+	news = GFileTmpfile();
 	rewind(at->sidh);
 	for ( i=0; i<at->sidcnt; ++i )
 	    putlong(news,getushort(at->sidh));
@@ -1929,7 +1895,7 @@ static void _dumpcffstrings(FILE *file, struct pschars *strs) {
 }
 
 static FILE *dumpcffstrings(struct pschars *strs) {
-    FILE *file = tmpfile();
+    FILE *file = GFileTmpfile();
     _dumpcffstrings(file,strs);
     PSCharsFree(strs);
 return( file );
@@ -2458,9 +2424,9 @@ static int dumpcffhmtx(struct alltabs *at,SplineFont *sf,int bitmaps) {
     int dovmetrics = sf->hasvmetrics;
     int width = at->gi.fixed_width;
 
-    at->gi.hmtx = tmpfile();
+    at->gi.hmtx = GFileTmpfile();
     if ( dovmetrics )
-	at->gi.vmtx = tmpfile();
+	at->gi.vmtx = GFileTmpfile();
     FigureFullMetricsEnd(sf,&at->gi,bitmaps);	/* Bitmap fonts use ttf convention of 3 magic glyphs */
     if ( at->gi.bygid[0]!=-1 && (sf->glyphs[at->gi.bygid[0]]->width==width || width<=0 )) {
 	putshort(at->gi.hmtx,sf->glyphs[at->gi.bygid[0]]->width);
@@ -2468,7 +2434,7 @@ static int dumpcffhmtx(struct alltabs *at,SplineFont *sf,int bitmaps) {
 	putshort(at->gi.hmtx,b.minx);
 	if ( dovmetrics ) {
 	    putshort(at->gi.vmtx,sf->glyphs[at->gi.bygid[0]]->vwidth);
-	    putshort(at->gi.vmtx,/*sf->vertical_origin-*/b.miny);
+	    putshort(at->gi.vmtx,sf->ascent - b.miny);
 	}
     } else {
 	putshort(at->gi.hmtx,width<=0?(sf->ascent+sf->descent)/2:width);
@@ -2500,13 +2466,13 @@ static int dumpcffhmtx(struct alltabs *at,SplineFont *sf,int bitmaps) {
 	sc = sf->glyphs[at->gi.bygid[i]];
 	if ( SCWorthOutputting(sc) ) {
 	    if ( i<=at->gi.lasthwidth )
-		putshort(at->gi.hmtx,sc->width);
+		putshort(at->gi.hmtx, sc->width<0 ? 0 : sc->width);
 	    SplineCharLayerFindBounds(sc,at->gi.layer,&b);
 	    putshort(at->gi.hmtx,b.minx);
 	    if ( dovmetrics ) {
 		if ( i<=at->gi.lastvwidth )
 		    putshort(at->gi.vmtx,sc->vwidth);
-		putshort(at->gi.vmtx,/*sf->vertical_origin-*/b.maxy);
+		putshort(at->gi.vmtx,sc->parent->ascent - b.maxy);
 	    }
 	    ++cnt;
 	    if ( i==at->gi.lasthwidth )
@@ -2533,9 +2499,9 @@ static void dumpcffcidhmtx(struct alltabs *at,SplineFont *_sf) {
     SplineFont *sf;
     int dovmetrics = _sf->hasvmetrics;
 
-    at->gi.hmtx = tmpfile();
+    at->gi.hmtx = GFileTmpfile();
     if ( dovmetrics )
-	at->gi.vmtx = tmpfile();
+	at->gi.vmtx = GFileTmpfile();
     FigureFullMetricsEnd(_sf,&at->gi,false);
 
     max = 0;
@@ -2557,7 +2523,7 @@ static void dumpcffcidhmtx(struct alltabs *at,SplineFont *_sf) {
 	    if ( dovmetrics ) {
 		if ( sc->ttf_glyph<=at->gi.lastvwidth )
 		    putshort(at->gi.vmtx,sc->vwidth);
-		putshort(at->gi.vmtx,/*sf->vertical_origin-*/b.maxy);
+		putshort(at->gi.vmtx,sc->parent->ascent - b.maxy);
 	    }
 	    ++cnt;
 	    if ( sc->ttf_glyph==at->gi.lasthwidth )
@@ -2590,12 +2556,12 @@ static int dumptype2glyphs(SplineFont *sf,struct alltabs *at) {
     int i;
     struct pschars *subrs, *chrs;
 
-    at->cfff = tmpfile();
-    at->sidf = tmpfile();
-    at->sidh = tmpfile();
-    at->charset = tmpfile();
-    at->encoding = tmpfile();
-    at->private = tmpfile();
+    at->cfff = GFileTmpfile();
+    at->sidf = GFileTmpfile();
+    at->sidh = GFileTmpfile();
+    at->charset = GFileTmpfile();
+    at->encoding = GFileTmpfile();
+    at->private = GFileTmpfile();
 
     dumpcffheader(at->cfff);
     dumpcffnames(sf,at->cfff);
@@ -2634,17 +2600,17 @@ static int dumpcidglyphs(SplineFont *sf,struct alltabs *at) {
     int i;
     struct pschars *glbls = NULL, *chrs;
 
-    at->cfff = tmpfile();
-    at->sidf = tmpfile();
-    at->sidh = tmpfile();
-    at->charset = tmpfile();
-    at->fdselect = tmpfile();
-    at->fdarray = tmpfile();
-    at->globalsubrs = tmpfile();
+    at->cfff = GFileTmpfile();
+    at->sidf = GFileTmpfile();
+    at->sidh = GFileTmpfile();
+    at->charset = GFileTmpfile();
+    at->fdselect = GFileTmpfile();
+    at->fdarray = GFileTmpfile();
+    at->globalsubrs = GFileTmpfile();
 
     at->fds = calloc(sf->subfontcnt,sizeof(struct fd2data));
     for ( i=0; i<sf->subfontcnt; ++i ) {
-	at->fds[i].private = tmpfile();
+	at->fds[i].private = GFileTmpfile();
 	ATFigureDefWidth(sf->subfonts[i],at,i);
     }
     if ( (chrs = CID2ChrsSubrs2(sf,at->fds,at->gi.flags,&glbls,at->gi.layer))==NULL )
@@ -2818,7 +2784,7 @@ static void sethead(struct head *head,SplineFont *sf,struct alltabs *at,
     head->checksumAdj = 0;
     head->magicNum = 0x5f0f3cf5;
     head->flags = 8|2|1;		/* baseline at 0, lsbline at 0, round ppem */
-    if ( format>=ff_ttf && format<=ff_ttfdfont ) {
+    if ( isttf_ff(format) ) {
 	if ( AnyInstructions(sf) )
 	    head->flags = 0x10|8|4|2|1;	/* baseline at 0, lsbline at 0, round ppem, instructions may depend on point size, instructions change metrics */
 	else if ( AnyMisleadingBitmapAdvances(sf,bsizes))
@@ -2828,23 +2794,24 @@ static void sethead(struct head *head,SplineFont *sf,struct alltabs *at,
     /*  a different advance width from that expected by scaling, then windows */
     /*  will only notice the fact if the 0x10 bit is set (even though this has*/
     /*  nothing to do with instructions) */
-/* Apple flags */
-    if ( sf->hasvmetrics )
-	head->flags |= (1<<5);		/* designed to be layed out vertically */
-    /* Bit 6 must be zero */
-    if ( arabic )
-	head->flags |= (1<<7);
-    if ( sf->sm )
-	head->flags |= (1<<8);		/* has metamorphesis effects */
-    if ( rl )
-	head->flags |= (1<<9);
-    indic_rearrange = 0;
-    for ( sm = sf->sm; sm!=NULL; sm=sm->next )
-	if ( sm->type == asm_indic )
-	    indic_rearrange = true;
-    if ( indic_rearrange )
-	head->flags |= (1<<10);
-/* End apple flags */
+    if ( at->applemode ) {
+	/* Apple flags */
+	if ( sf->hasvmetrics )
+	    head->flags |= (1<<5);		/* designed to be layed out vertically */
+	/* Bit 6 must be zero */
+	if ( arabic )
+	    head->flags |= (1<<7);
+	if ( sf->sm )
+	    head->flags |= (1<<8);		/* has metamorphesis effects */
+	if ( rl )
+	    head->flags |= (1<<9);
+	indic_rearrange = 0;
+	for ( sm = sf->sm; sm!=NULL; sm=sm->next )
+	    if ( sm->type == asm_indic )
+		indic_rearrange = true;
+	if ( indic_rearrange )
+	    head->flags |= (1<<10);
+    }
     if ( sf->head_optimized_for_cleartype )
 	head->flags |= (1<<13);
     head->emunits = sf->ascent+sf->descent;
@@ -2854,16 +2821,23 @@ static void sethead(struct head *head,SplineFont *sf,struct alltabs *at,
     if ( at->gi.glyph_len<0x20000 )
 	head->locais32 = 0;
 
-    /* I assume we've always got some neutrals (spaces, punctuation) */
-    if ( lr && rl )
-	head->dirhint = 0;
-    else if ( rl )
-	head->dirhint = -2;
-    else
-	head->dirhint = 2;
-    if ( rl )
-	head->flags |= (1<<9);		/* Apple documents this */
-    /* if there are any indic characters, set bit 10 */
+    if ( !at->applemode ) {
+      /* "Deprecated (Set to 2)":
+       * https://www.microsoft.com/typography/otspec/head.htm#fontDirectionHint
+       */
+      head->dirhint = 2;
+    } else {
+      /* I assume we've always got some neutrals (spaces, punctuation) */
+      if ( lr && rl )
+          head->dirhint = 0;
+      else if ( rl )
+          head->dirhint = -2;
+      else
+          head->dirhint = 2;
+      if ( rl )
+          head->flags |= (1<<9);		/* Apple documents this */
+      /* if there are any indic characters, set bit 10 */
+    }
 
     cvt_unix_to_1904(sf->creationtime,head->createtime);
     cvt_unix_to_1904(sf->modificationtime,head->modtime);
@@ -2928,7 +2902,7 @@ static void sethhead(struct hhead *hhead,struct hhead *vhead,struct alltabs *at,
 	hhead->caretSlopeRise = 1;
     else {
 	hhead->caretSlopeRise = 100;
-	hhead->caretSlopeRun = (int) rint(100*tan(-sf->italicangle*3.1415926535897/180.));
+	hhead->caretSlopeRun = (int) rint(100*tan(-sf->italicangle*FF_PI/180.));
     }
 
     vhead->maxwidth = height;
@@ -3000,7 +2974,7 @@ void SFDefaultOS2Simple(struct pfminfo *pfminfo,SplineFont *sf) {
 }
 
 void SFDefaultOS2SubSuper(struct pfminfo *pfminfo,int emsize,double italic_angle) {
-    double s = sin(italic_angle*3.1415926535897932/180.0);
+    double s = sin(italic_angle*FF_PI/180.0);
     pfminfo->os2_supysize = pfminfo->os2_subysize = .7*emsize;
     pfminfo->os2_supxsize = pfminfo->os2_subxsize = .65*emsize;
     pfminfo->os2_subyoff = .14*emsize;
@@ -3332,7 +3306,7 @@ static void setos2(struct os2 *os2,struct alltabs *at, SplineFont *sf,
 	os2->version = 4;
     if ( sf->os2_version > os2->version )
 	os2->version = sf->os2_version;
-    if (( format>=ff_ttf && format<=ff_otfdfont) && (at->gi.flags&ttf_flag_symbol))
+    if ( isttflike_ff(format) && (at->gi.flags&ttf_flag_symbol))
 	modformat = ff_ttfsym;
 
     os2->weightClass = sf->pfminfo.weight;
@@ -3368,7 +3342,6 @@ static void setos2(struct os2 *os2,struct alltabs *at, SplineFont *sf,
 	os2->fsSel |= 8;
     if ( os2->version>=4 ) {
 	if ( strstrmatch(sf->fontname,"Obli")!=NULL ) {
-	    os2->fsSel &= ~1;		/* Turn off Italic */
 	    os2->fsSel |= 512;		/* Turn on Oblique */
 	}
 	if ( sf->use_typo_metrics )
@@ -3412,8 +3385,8 @@ docs are wrong.
 	    /*  BMP then last is 0xffff */
 	    /* sc->ttf_glyph>2 is to skip the first few truetype glyphs but */
 	    /*  that doesn't work for cff files which only have .notdef to ignore */
-	    if ( ( format>=ff_ttf && format<=ff_otfdfont && sc->ttf_glyph>2) ||
-		    ( format>=ff_ttf && format<=ff_otfdfont && sc->ttf_glyph>0) ) {
+	    if ( ( isttflike_ff(format) && sc->ttf_glyph>2 ) ||
+		    ( isttflike_ff(format) && sc->ttf_glyph>0 ) ) {
 		if ( sc->unicodeenc<=0xffff ) {
 		    if ( sc->unicodeenc<first ) first = sc->unicodeenc;
 		    if ( sc->unicodeenc>last ) last = sc->unicodeenc;
@@ -3555,7 +3528,7 @@ docs are wrong.
 static void redoloca(struct alltabs *at) {
     int i;
 
-    at->loca = tmpfile();
+    at->loca = GFileTmpfile();
     if ( at->head.locais32 ) {
 	for ( i=0; i<=at->maxp.numGlyphs; ++i )
 	    putlong(at->loca,at->gi.loca[i]);
@@ -3575,7 +3548,7 @@ static void redoloca(struct alltabs *at) {
 
 static void dummyloca(struct alltabs *at) {
 
-    at->loca = tmpfile();
+    at->loca = GFileTmpfile();
     if ( at->head.locais32 ) {
 	putlong(at->loca,0);
 	at->localen = sizeof(int32);
@@ -3587,7 +3560,8 @@ static void dummyloca(struct alltabs *at) {
 }
 
 static void redohead(struct alltabs *at) {
-    at->headf = tmpfile();
+    if (at->headf) fclose(at->headf);
+    at->headf = GFileTmpfile();
 
     putlong(at->headf,at->head.version);
     putlong(at->headf,at->head.revision);
@@ -3620,10 +3594,10 @@ static void redohhead(struct alltabs *at,int isv) {
     FILE *f;
 
     if ( !isv ) {
-	f = at->hheadf = tmpfile();
+	f = at->hheadf = GFileTmpfile();
 	head = &at->hhead;
     } else {
-	f = at->vheadf = tmpfile();
+	f = at->vheadf = GFileTmpfile();
 	head = &at->vhead;
     }
 
@@ -3654,7 +3628,7 @@ static void redohhead(struct alltabs *at,int isv) {
 }
 
 static void redomaxp(struct alltabs *at,enum fontformat format) {
-    at->maxpf = tmpfile();
+    at->maxpf = GFileTmpfile();
 
     putlong(at->maxpf,at->maxp.version);
     putshort(at->maxpf,at->maxp.numGlyphs);
@@ -3681,7 +3655,7 @@ static void redomaxp(struct alltabs *at,enum fontformat format) {
 
 static void redoos2(struct alltabs *at) {
     int i;
-    at->os2f = tmpfile();
+    at->os2f = GFileTmpfile();
 
     putshort(at->os2f,at->os2.version);
     putshort(at->os2f,at->os2.avgCharWid);
@@ -3734,7 +3708,7 @@ static void redoos2(struct alltabs *at) {
 static void dumpgasp(struct alltabs *at, SplineFont *sf) {
     int i;
 
-    at->gaspf = tmpfile();
+    at->gaspf = GFileTmpfile();
     if ( sf->gasp_cnt==0 ) {
 	putshort(at->gaspf,0);	/* Old version number */
 	/* For fonts with no instructions always dump a gasp table which */
@@ -3806,9 +3780,9 @@ void DefaultTTFEnglishNames(struct ttflangname *dummy, SplineFont *sf) {
     if ( dummy->names[ttf_subfamily]==NULL || *dummy->names[ttf_subfamily]=='\0' )
 	dummy->names[ttf_subfamily] = utf8_verify_copy(SFGetModifiers(sf));
     if ( dummy->names[ttf_uniqueid]==NULL || *dummy->names[ttf_uniqueid]=='\0' ) {
-	time(&now);
-	tm = localtime(&now);
-	sprintf( buffer, "%s : %s : %d-%d-%d",
+	now = GetTime();
+	tm = gmtime(&now);
+	snprintf( buffer, sizeof(buffer), "%s : %s : %d-%d-%d",
 		BDFFoundry?BDFFoundry:TTFFoundry?TTFFoundry:"FontForge 2.0",
 		sf->fullname!=NULL?sf->fullname:sf->fontname,
 		tm->tm_mday, tm->tm_mon+1, tm->tm_year+1900 );
@@ -3860,7 +3834,7 @@ return( mn1->lang - mn2->lang );
 return( mn1->strid-mn2->strid );
 }
 
-static void AddEncodedName(NamTab *nt,char *utf8name,uint16 lang,uint16 strid) {
+static void AddEncodedName(NamTab *nt,char *utf8name,uint16 lang,uint16 strid, int nomacnames) {
     NameEntry *ne;
     int maclang, macenc= -1, specific;
     char *macname = NULL;
@@ -3895,7 +3869,7 @@ return;		/* Should not happen, but it did */
     maclang = WinLangToMac(lang);
     if ( !nt->applemode && lang!=0x409 )
 	maclang = 0xffff;
-    if ( maclang!=0xffff ) {
+    if ( !nomacnames && maclang!=0xffff ) {
 #ifdef FONTFORGE_CONFIG_APPLE_UNICODE_NAMES
 	if ( strid!=ttf_postscriptname ) {
 	    *ne = ne[-1];
@@ -4012,13 +3986,14 @@ static void dumpnames(struct alltabs *at, SplineFont *sf,enum fontformat format)
     NamTab nt;
     struct otfname *otfn;
     struct otffeatname *fn;
+    int nomacnames = at->gi.flags&ttf_flag_nomacnames;
 
     memset(&nt,0,sizeof(nt));
     nt.encoding_name = at->map->enc;
     nt.format	     = format;
     nt.applemode     = at->applemode;
-    nt.strings	     = tmpfile();
-    if (( format>=ff_ttf && format<=ff_otfdfont) && (at->gi.flags&ttf_flag_symbol))
+    nt.strings	     = GFileTmpfile();
+    if (isttflike_ff(format) && (at->gi.flags&ttf_flag_symbol))
 	nt.format    = ff_ttfsym;
 
     memset(&dummy,0,sizeof(dummy));
@@ -4032,12 +4007,12 @@ static void dumpnames(struct alltabs *at, SplineFont *sf,enum fontformat format)
     DefaultTTFEnglishNames(&dummy, sf);
 
     for ( i=0; i<ttf_namemax; ++i ) if ( dummy.names[i]!=NULL )
-	AddEncodedName(&nt,dummy.names[i],0x409,i);
+	AddEncodedName(&nt,dummy.names[i],0x409,i, nomacnames);
     for ( cur=sf->names; cur!=NULL; cur=cur->next ) {
 	if ( cur->lang!=0x409 )
 	    for ( i=0; i<ttf_namemax; ++i )
 		if ( cur->names[i]!=NULL )
-		    AddEncodedName(&nt,cur->names[i],cur->lang,i);
+		    AddEncodedName(&nt,cur->names[i],cur->lang,i, nomacnames);
     }
 
     /* The examples I've seen of the feature table only contain platform==mac */
@@ -4063,17 +4038,17 @@ static void dumpnames(struct alltabs *at, SplineFont *sf,enum fontformat format)
     /* Wow, the GPOS 'size' feature uses the name table in a very mac-like way*/
     if ( at->fontstyle_name_strid!=0 && sf->fontstyle_name!=NULL ) {
 	for ( otfn = sf->fontstyle_name; otfn!=NULL; otfn = otfn->next )
-	    AddEncodedName(&nt,otfn->name,otfn->lang,at->fontstyle_name_strid);
+	    AddEncodedName(&nt,otfn->name,otfn->lang,at->fontstyle_name_strid, nomacnames);
     }
     /* As do some other features now */
     for ( fn = sf->feat_names; fn!=NULL; fn=fn->next ) {
 	for ( otfn = fn->names; otfn!=NULL; otfn = otfn->next )
-	    AddEncodedName(&nt,otfn->name,otfn->lang,fn->nid);
+	    AddEncodedName(&nt,otfn->name,otfn->lang,fn->nid, nomacnames);
     }
 
     qsort(nt.entries,nt.cur,sizeof(NameEntry),compare_entry);
 
-    at->name = tmpfile();
+    at->name = GFileTmpfile();
     putshort(at->name,0);				/* format */
     putshort(at->name,nt.cur);				/* numrec */
     putshort(at->name,(3+nt.cur*6)*sizeof(int16));	/* offset to strings */
@@ -4109,11 +4084,11 @@ static void dumppost(struct alltabs *at, SplineFont *sf, enum fontformat format)
 	    (at->gi.flags&ttf_flag_shortps));
     uint32 here;
 
-    at->post = tmpfile();
+    at->post = GFileTmpfile();
 
     putlong(at->post,shorttable?0x00030000:0x00020000);	/* formattype */
     putfixed(at->post,sf->italicangle);
-    putshort(at->post,sf->upos-sf->uwidth/2);		/* 'post' defn says top of rect, while FontInfo def says center of rect */
+    putshort(at->post,sf->upos+sf->uwidth/2);		/* 'post' defn says top of rect, while FontInfo def says center of rect */
     putshort(at->post,sf->uwidth);
     putlong(at->post,at->isfixed);
     putlong(at->post,0);		/* no idea about memory */
@@ -4368,7 +4343,7 @@ return( NULL );
 	subheads[i].rangeoff = subheads[i].rangeoff*sizeof(uint16) +
 		(subheadcnt-i)*sizeof(struct subhead) + sizeof(uint16);
 
-    sub = tmpfile();
+    sub = GFileTmpfile();
     if ( sub==NULL )
 return( NULL );
 
@@ -4488,7 +4463,7 @@ return(NULL);
     if ( !map->enc->is_unicodefull )
 	map = freeme = EncMapFromEncoding(sf,FindOrMakeEncoding("ucs4"));
 
-    format12 = tmpfile();
+    format12 = GFileTmpfile();
     if ( format12==NULL )
 return( NULL );
 
@@ -4533,7 +4508,7 @@ static FILE *NeedsUCS2Table(SplineFont *sf,int *ucs2len,EncMap *map,int issymbol
     struct cmapseg { uint16 start, end; uint16 delta; uint16 rangeoff; } *cmapseg;
     uint16 *ranges;
     SplineChar *sc;
-    FILE *format4 = tmpfile();
+    FILE *format4 = GFileTmpfile();
 
     memset(avail,0xff,65536*sizeof(uint32));
     if ( map->enc->is_unicodebmp || map->enc->is_unicodefull ) { int gid;
@@ -4573,7 +4548,7 @@ static FILE *NeedsUCS2Table(SplineFont *sf,int *ucs2len,EncMap *map,int issymbol
 	    j = -1;
     }
     cmapseg = calloc(segcnt+1,sizeof(struct cmapseg));
-    ranges = malloc(cnt*sizeof(int16));
+    ranges = malloc(cnt*sizeof(uint16));
     j = -1;
     for ( i=segcnt=0; i<65536; ++i ) {
 	if ( avail[i]!=0xffffffff && j==-1 ) {
@@ -4663,10 +4638,10 @@ static FILE *NeedsVariationSequenceTable(SplineFont *sf,int *vslen) {
 		if ( i>=vs_cnt ) {
 		    if ( i>=vs_max ) {
 			if ( vses==vsbuf ) {
-			    vses = malloc((vs_max*=2)*sizeof(uint32));
+			    vses = malloc((vs_max*=2)*sizeof(int32));
 			    memcpy(vses,vsbuf,sizeof(vsbuf));
 			} else
-			    vses = realloc(vses,(vs_max+=512)*sizeof(uint32));
+			    vses = realloc(vses,(vs_max+=512)*sizeof(int32));
 		    }
 		    vses[vs_cnt++] = altuni->vs;
 		}
@@ -4693,7 +4668,7 @@ return( NULL );			/* No variation selectors */
 
     avail = malloc(unicode4_size*sizeof(uint32));
 
-    format14 = tmpfile();
+    format14 = GFileTmpfile();
     putshort(format14,14);
     putlong(format14,0);		/* Length, fixup later */
     putlong(format14,vs_cnt);		/* number of selectors */
@@ -4796,10 +4771,10 @@ static void dumpcmap(struct alltabs *at, SplineFont *sf,enum fontformat format) 
     int mspos, ucs4pos, cjkpos, applecjkpos, vspos, start_of_macroman;
     int modformat = format;
 
-    if (( format>=ff_ttf && format<=ff_otfdfont) && (at->gi.flags&ttf_flag_symbol))
+    if (isttflike_ff(format) && (at->gi.flags&ttf_flag_symbol))
 	modformat = ff_ttfsym;
 
-    at->cmap = tmpfile();
+    at->cmap = GFileTmpfile();
 
     /* MacRoman encoding table */ /* Not going to bother with making this work for cid fonts */
     /* I now see that Apple doesn't restrict us to format 0 sub-tables (as */
@@ -4921,17 +4896,13 @@ static void dumpcmap(struct alltabs *at, SplineFont *sf,enum fontformat format) 
     if ( hasmac&1 ) {
 	/* big mac table, just a copy of the ms table */
 	putshort(at->cmap,0);	/* mac unicode platform */
-	putshort(at->cmap,3);	/* Unicode 2.0 */
+	putshort(at->cmap,3);	/* Unicode 2.0, BMP only */
 	putlong(at->cmap,mspos);
     }
     if ( format12!=NULL ) {
 	/* full unicode mac table, just a copy of the ms table */
 	putshort(at->cmap,0);	/* mac unicode platform */
-        if( map->enc->is_unicodefull ) {
-	    putshort(at->cmap,10);	/* Unicode 2.0, unicode beyond BMP */
-	} else {
-	    putshort(at->cmap,4);	/* Unicode 2.0, unicode BMP */
-	}
+	putshort(at->cmap,4);	/* Unicode 2.0, full repertoire */
 	putlong(at->cmap,ucs4pos);
     }
     if ( format14!=NULL ) {
@@ -5204,7 +5175,7 @@ static FILE *dumpstoredtable(SplineFont *sf,uint32 tag,int *len) {
 return( NULL );
     }
 
-    out = tmpfile();
+    out = GFileTmpfile();
     fwrite(tab->data,1,tab->len,out);
     if ( (tab->len&1))
 	putc('\0',out);
@@ -5220,7 +5191,7 @@ static FILE *dumpsavedtable(struct ttf_table *tab) {
     if ( tab==NULL )
 return( NULL );
 
-    out = tmpfile();
+    out = GFileTmpfile();
     fwrite(tab->data,1,tab->len,out);
     if ( (tab->len&1))
 	putc('\0',out);
@@ -6128,16 +6099,9 @@ int WriteTTFFont(char *fontname,SplineFont *sf,enum fontformat format,
     FILE *ttf;
     int ret;
 
-    if ( strstr(fontname,"://")!=NULL ) {
-	if (( ttf = tmpfile())==NULL )
+    if (( ttf=fopen(fontname,"wb+"))==NULL )
 return( 0 );
-    } else {
-	if (( ttf=fopen(fontname,"wb+"))==NULL )
-return( 0 );
-    }
     ret = _WriteTTFFont(ttf,sf,format,bsizes,bf,flags,map,layer);
-    if ( strstr(fontname,"://")!=NULL && ret )
-	ret = URLFromFile(fontname,ttf);
     if ( ret && (flags&ttf_flag_glyphmap) )
 	DumpGlyphToNameMap(fontname,sf);
     if ( fclose(ttf)==-1 )
@@ -6193,7 +6157,7 @@ static void dumphex(struct hexout *hexout,FILE *temp,int length) {
 }
 
 static void dumptype42(FILE *type42,struct alltabs *at, enum fontformat format) {
-    FILE *temp = tmpfile();
+    FILE *temp = GFileTmpfile();
     struct hexout hexout;
     int i, length;
 
@@ -6345,7 +6309,7 @@ return( false );
 }
 
 static SplineChar *hashglyphfound(SplineChar *sc,UHash *uhash,NHash *nhash,int layer) {
-    int hash;
+    unsigned int hash;
     struct splinecharlist *test;
     struct altuni *alt;
 
@@ -6372,7 +6336,7 @@ return( NULL );
 }
 
 static void hashglyphadd(SplineChar *sc,UHash *uhash,NHash *nhash) {
-    int hash;
+    unsigned int hash;
     struct splinecharlist *test;
     struct altuni *alt;
 
@@ -6932,13 +6896,8 @@ int WriteTTC(const char *filename,struct sflist *sfs,enum fontformat format,
     struct alltabs *ret;
     SplineFont dummysf;
 
-    if ( strstr(filename,"://")!=NULL ) {
-	if (( ttc = tmpfile())==NULL )
+    if (( ttc=fopen(filename,"wb+"))==NULL )
 return( 0 );
-    } else {
-	if (( ttc=fopen(filename,"wb+"))==NULL )
-return( 0 );
-    }
 
     format = (ttcflags & ttc_flag_cff) ? ff_otf : ff_ttf;
 
@@ -6958,7 +6917,7 @@ return( 0 );
 	/* Generate all the fonts (don't generate DSIGs, there's one DSIG for */
 	/*  the ttc as a whole) */
 	for ( sfitem= sfs, cnt=0; sfitem!=NULL; sfitem=sfitem->next, ++cnt ) {
-	    sfitem->tempttf = tmpfile();
+	    sfitem->tempttf = GFileTmpfile();
 	    if ( sfitem->tempttf==NULL )
 		ok=0;
 	    else
@@ -7000,8 +6959,6 @@ return( true );
 	    IError("Miscalculated offsets in ttc");
     } else
 
-    if ( strstr(filename,"://")!=NULL && ok )
-	ok = URLFromFile(filename,ttc);
     if ( ferror(ttc))
 	ok = false;
     if ( fclose(ttc)==-1 )

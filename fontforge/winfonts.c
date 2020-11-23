@@ -24,13 +24,28 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "winfonts.h"
+
+#include "bvedit.h"
+#include "encoding.h"
 #include "fontforge.h"
-#include <stdio.h>
-#include <math.h>
+#include "fontforgevw.h"
+#include "gfile.h"
+#include "mem.h"
+#include "splinefill.h"
 #include "splinefont.h"
-#include <ustring.h>
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottf.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
+#include <stdio.h>
 #include <string.h>
-#include <utype.h>
 
 /* Look for
 Source: Microsoft Windows 2.0 SDK Programmer's Refrence, pages 639 through 645
@@ -485,6 +500,7 @@ return( false );
     if ( badch!=-1 )
 	LogError( _("At pixelsize %d the character %s either starts before the origin or extends beyond the advance width.\n"),
 		font->pixelsize, font->glyphs[badch]->sc->name );
+    memset(&pfminfo,'\0',sizeof(pfminfo));
     SFDefaultOS2Info(&pfminfo,font->sf,font->sf->fontname);
     widbytes = avgwid+spacesize;
     if ( cnt!=0 ) avgwid = rint(avgwid/(bigreal) cnt);
@@ -645,8 +661,6 @@ return( 0 );
 return( ret );
 }
 
-#include "fontforgevw.h"
-
 /* From wine tools fnt2fon.c by Huw Davies, modified with permission */
 typedef unsigned short	WORD;
 typedef unsigned char	BYTE;
@@ -729,52 +743,6 @@ typedef struct
      */
 } NE_TYPEINFO;
 
-typedef struct
-{
-    INT16 dfType;
-    INT16 dfPoints;
-    INT16 dfVertRes;
-    INT16 dfHorizRes;
-    INT16 dfAscent;
-    INT16 dfInternalLeading;
-    INT16 dfExternalLeading;
-    CHAR  dfItalic;
-    CHAR  dfUnderline;
-    CHAR  dfStrikeOut;
-    INT16 dfWeight;
-    BYTE  dfCharSet;
-    INT16 dfPixWidth;
-    INT16 dfPixHeight;
-    CHAR  dfPitchAndFamily;
-    INT16 dfAvgWidth;
-    INT16 dfMaxWidth;
-    CHAR  dfFirstChar;
-    CHAR  dfLastChar;
-    CHAR  dfDefaultChar;
-    CHAR  dfBreakChar;
-    INT16 dfWidthBytes;
-    LONG  dfDevice;
-    LONG  dfFace;
-    LONG  dfBitsPointer;
-    LONG  dfBitsOffset;
-    CHAR  dfReserved;
-    /* Fields, introduced for Windows 3.x fonts */
-    LONG  dfFlags;
-    INT16 dfAspace;
-    INT16 dfBspace;
-    INT16 dfCspace;
-    LONG  dfColorPointer;
-    LONG  dfReserved1[4];
-} FONTINFO16, *LPFONTINFO16;
-
-struct _fnt_header
-{
-    short dfVersion;
-    long dfSize;
-    char dfCopyright[60];
-    FONTINFO16 fi;
-};
-
 static const BYTE MZ_hdr[] = {'M',  'Z',  0x0d, 0x01, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00,
                  0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -835,10 +803,11 @@ int FONFontDump(char *filename,SplineFont *sf, int32 *sizes,int resol,
 	    free(fntarray);
 return( false );
 	}
-	fntarray[i] = tmpfile();
+	fntarray[i] = GFileTmpfile();
 	if ( !_FntFontDump(fntarray[i],bdf,map,resol) ) {
 	    for ( j=0; j<=i; ++j )
 		fclose(fntarray[j]);
+            free(file_lens);
 	    free(fntarray);
 return( false );
 	}
@@ -913,6 +882,7 @@ return( false );
 	for ( j=0; j<num_files; ++j )
 	    fclose(fntarray[j]);
 	free(fntarray);
+        free(file_lens);
 return( false );
     }
 
@@ -1033,11 +1003,15 @@ return( false );
     for(res = first_res, i = 0; i < num_files; i++, res++) {
         lputshort(fon,res);
 
+        /* The first 0x6D bytes of the FNT file and the FONTDIRENTRY match */
         rewind(fntarray[i]);
-        fread(buf, 0x72, 1, fntarray[i]);
-        fnt_header = (struct _fnt_header *)buf;
-        fnt_header->fi.dfBitsOffset = 0;	/* I can ignore endianness here. all is 0 */
-        fwrite(buf, 0x72, 1, fon);
+        fread(buf, 0x6D, 1, fntarray[i]);
+        fwrite(buf, 0x6D, 1, fon);
+
+        /* FONTDIRENTRY.dfReserved */
+        lputlong(fon,0);
+        /* FONTDIRENTRY.szDeviceName */
+        fputc(0x00, fon);
 
 	fseek(fntarray[i], 0x69, SEEK_SET);
 	off = lgetlong(fntarray[i]);

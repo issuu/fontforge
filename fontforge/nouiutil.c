@@ -24,12 +24,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "uiinterface.h"
+
+#include <fontforge-config.h>
+
+#include "basics.h"
 #include "splinefont.h"
+#include "uiinterface.h"
+#include "ustring.h"
+
 #include <stdarg.h>
 #include <stdio.h>
-#include <basics.h>
-#include <ustring.h>
 
 static void NOUI_IError(const char *format,...) {
     va_list ap;
@@ -87,7 +91,7 @@ static int NOUI_choose(const char *title, const char **choices,int cnt, int def,
 return( def );
 }
 
-static int NOUI_choose_multiple(char *title, const char **choices,char *sel,
+static int NOUI_choose_multiple(const char *title, const char **choices, char *sel,
 	int cnt, char *buts[2], const char *question,...) {
 return( -1 );
 }
@@ -128,8 +132,10 @@ static int NOUI_alwaystrue(void) {
 return( true );
 }
 
-static int NOUI_DefaultStrokeFlags(void) {
-return( sf_correctdir );
+static void NOUI_import_params_dlg(struct importparams *ip) {
+}
+
+static void NOUI_export_params_dlg(struct exportparams *ep) {
 }
 
 static struct ui_interface noui_interface = {
@@ -164,8 +170,8 @@ static struct ui_interface noui_interface = {
 
     NOUI_TTFNameIds,
     NOUI_MSLangString,
-
-    NOUI_DefaultStrokeFlags
+    NOUI_import_params_dlg,
+    NOUI_export_params_dlg
 };
 struct ui_interface *ui_interface = &noui_interface;
 

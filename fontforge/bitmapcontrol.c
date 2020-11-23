@@ -24,10 +24,20 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include "ustring.h"
-#include <math.h>
+
+#include <fontforge-config.h>
+
 #include "bitmapcontrol.h"
+
+#include "autohint.h"
+#include "bitmapcontrol.h"
+#include "bvedit.h"
+#include "fontforgevw.h"
+#include "splinefill.h"
+#include "splinesaveafm.h"
+#include "ustring.h"
+
+#include <math.h>
 
 int bdfcontrol_lastwhich = bd_selected;
 

@@ -24,9 +24,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgeui.h"
+
+#ifndef FONTFORGE_FVMETRICS_H
+#define FONTFORGE_FVMETRICS_H
+
+#include "baseviews.h"
+#include "splinefont.h"
+
+#include "ustring.h"
+
 #include <math.h>
-#include <ustring.h>
 
 enum settype { st_set, st_scale, st_incr };
 
@@ -45,3 +52,6 @@ typedef struct createwidthdata {
 extern void CVDoit(CreateWidthData *wd);
 extern void FVDoit(CreateWidthData *wd);
 extern void GenericVDoit(CreateWidthData *wd);
+extern void FVSetWidthScript(FontViewBase *fv, enum widthtype wtype, int val, int incr);
+
+#endif /* FONTFORGE_FVMETRICS_H */

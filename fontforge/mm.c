@@ -24,12 +24,25 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforgevw.h"
-#include <ustring.h>
-#include <math.h>
-#include <utype.h>
-#include "ttf.h"
+
+#include <fontforge-config.h>
+
 #include "mm.h"
+
+#include "dumppfa.h"
+#include "fontforgevw.h"
+#include "lookups.h"
+#include "macenc.h"
+#include "splinesaveafm.h"
+#include "splineutil.h"
+#include "splineutil2.h"
+#include "tottfgpos.h"
+#include "tottfvar.h"
+#include "ttf.h"
+#include "ustring.h"
+#include "utype.h"
+
+#include <math.h>
 
 const char *MMAxisAbrev(char *axis_name) {
     if ( strcmp(axis_name,"Weight")==0 )

@@ -24,11 +24,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #include <fontforge-config.h>
 
-#include <stddef.h>
+#include "chardata.h"
+#include "ffglib.h"
 #include "ustring.h"
 #include "utype.h"
+
+#include <assert.h>
+#include <stddef.h>
 
 long uc_strcmp(const unichar_t *str1,const char *str2) {
     long ch1, ch2;
@@ -558,18 +563,25 @@ void utf82u_strcat(unichar_t *to,const char *from) {
     utf82u_strcpy(to+u_strlen(to),from);
 }
 
-char *u2utf8_strcpy(char *utf8buf,const unichar_t *ubuf) {
+char *u2utf8_strncpy(char *utf8buf,const unichar_t *ubuf,int len) {
 /* Copy unichar string 'ubuf' into utf8 buffer string 'utf8buf' */
     char *pt = utf8buf;
 
+    assert(utf8buf != NULL);
+
     if ( ubuf!=NULL ) {
-	while ( *ubuf && (pt=utf8_idpb(pt,*ubuf++,0)) );
-	if ( pt ) {
-	    *pt = '\0';
-	    return( utf8buf );
-	}
+        while ( *ubuf && (--len != 0) ) {
+            pt=utf8_idpb(pt,*ubuf++,0);
+        }
+        *pt = '\0';
+        return( utf8buf );
     }
+
     return( NULL );
+}
+
+char *u2utf8_strcpy(char *utf8buf,const unichar_t *ubuf) {
+    return u2utf8_strncpy(utf8buf, ubuf, -1);
 }
 
 char *utf8_strchr(const char *str, int search) {
@@ -643,18 +655,21 @@ char *u2utf8_copy(const unichar_t *ubuf) {
 
 char *u2utf8_copyn(const unichar_t *ubuf,int len) {
 /* Make a utf8 string copy of unichar string ubuf[0..len] */
-    char *utf8buf, *pt;
+    char *utf8buf, *pt, *pt2;
 
     if ( ubuf==NULL || len<=0 || (utf8buf=pt=(char *)malloc(len*6+1))==NULL )
 	return( NULL );
 
-    while ( (pt=utf8_idpb(pt,*ubuf++,0)) && --len );
-    if ( pt ) {
-	*pt = '\0';
-	return( utf8buf );
-    }
-    free( utf8buf );
-    return( NULL );
+    while ( (pt2=utf8_idpb(pt,*ubuf++,0)) && --len )
+	pt = pt2;
+
+    if ( pt2 )
+	pt = pt2;
+    else
+	TRACE("u2utf8_copyn: truncated on invalid char 0x%x\n", ubuf[-1]);
+
+    *pt = '\0';
+    return( utf8buf );
 }
 
 int32 utf8_ildb(const char **_text) {
@@ -663,7 +678,9 @@ int32 utf8_ildb(const char **_text) {
     const uint8 *text = (const uint8 *) *_text;
     /* Increment and load character */
 
-    if ( (ch = *text++)<0x80 ) {
+    if ( text==NULL )
+	return( val );
+    else if ( (ch = *text++)<0x80 ) {
 	val = ch;
     } else if ( ch<=0xbf ) {
 	/* error */
@@ -858,7 +875,6 @@ void utf8_strncpy(register char *to, const char *from, int len) {
     to[old-from] = 0;
 }
 
-#include <chardata.h>
 char *StripToASCII(const char *utf8_str) {
     /* Remove any non-ascii characters: Special case, convert the copyright symbol to (c) */
     char *newcr, *pt, *end;
@@ -919,45 +935,56 @@ return( newcr );
 }
 
 int AllAscii(const char *txt) {
-    for ( ; *txt!='\0'; ++txt ) {
-	if ( *txt=='\t' || *txt=='\n' || *txt=='\r' )
+/* Verify string only All ASCII printable characters */
+    register unsigned char ch;
+
+    if ( txt==NULL )
+	return( false );
+
+    for ( ; (ch=(unsigned char) *txt)!='\0'; ++txt )
+	if ( (ch>=' ' && ch<'\177' ) || \
+	     ch=='\t' || ch=='\n' || ch=='\r' )
 	    /* All right */;
-	else if ( *txt<' ' || *txt>='\177' )
-return( false );
-    }
-return( true );
+	else
+	    return( false );
+
+    return( true );
 }
 
 int uAllAscii(const unichar_t *txt) {
-    for ( ; *txt!='\0'; ++txt ) {
-	if ( *txt=='\t' || *txt=='\n' || *txt=='\r' )
+/* Verify string only All ASCII printable unichar_t. */
+
+    if ( txt==NULL )
+	return( false );
+
+    for ( ; *txt!='\0'; ++txt )
+	if ( (*txt>=' ' && *txt<'\177' ) || \
+	     *txt=='\t' || *txt=='\n' || *txt=='\r' )
 	    /* All right */;
-	else if ( *txt<' ' || *txt>='\177' )
-return( false );
+	else
+	    return( false );
+
+    return( true );
+}
+
+char *chomp( char *line ) {
+/* Chomp the last '\r' and '\n' in character string. */
+/* \r = CR used as a newline char in MAC OS before X */
+/* \n = LF used as a newline char in MAC OSX & Linux */
+/* \r\n = CR + LF used as a newline char in Windows. */
+    int x;
+
+    if( line==NULL || (x=strlen(line)-1)<0 )
+	return( line );
+
+    if ( line[x]=='\n' ) {
+	line[x] = '\0';
+	--x;
     }
-return( true );
+    if ( x>=0 && line[x]=='\r' )
+	line[x] = '\0';
+    return( line );
 }
-
-char* chomp( char* line ) {
-    if( !line )
-	return line;
-    if ( line[strlen(line)-1]=='\n' )
-	line[strlen(line)-1] = '\0';
-    if ( line[strlen(line)-1]=='\r' )
-	line[strlen(line)-1] = '\0';
-    return line;
-}
-
-char *copytolower(const char *input)
-{
-    char* ret = copy(input);
-    char* p = ret;
-    for( ; *p; ++p ) {
-	*p = tolower(*p);
-    }
-    return ret;
-}
-
 
 int endswith(const char *haystack,const char *needle) {
     int haylen = strlen( haystack );
@@ -969,11 +996,11 @@ int endswith(const char *haystack,const char *needle) {
 }
 
 int endswithi(const char *haystackZ,const char *needleZ) {
-    char* haystack = copytolower(haystackZ);
-    char* needle   = copytolower(needleZ);
+    gchar* haystack = g_ascii_strdown(haystackZ,-1);
+    gchar* needle   = g_ascii_strdown(needleZ,-1);
     int ret = endswith( haystack, needle );
-    free( haystack );
-    free( needle );
+    g_free( haystack );
+    g_free( needle );
     return ret;
 }
 
@@ -982,8 +1009,8 @@ int endswithi_partialExtension( const char *haystackZ,const char *needleZ) {
     if( nedlen == 0 ) {
 	return 0;
     }
-    char* haystack = copytolower(haystackZ);
-    char* needle   = copytolower(needleZ);
+    gchar* haystack = g_ascii_strdown(haystackZ,-1);
+    gchar* needle   = g_ascii_strdown(needleZ,-1);
     int ret = 0;
     int i = nedlen-1;
     ret |= endswith( haystack, needle );
@@ -991,8 +1018,8 @@ int endswithi_partialExtension( const char *haystackZ,const char *needleZ) {
 	needle[i] = '\0';
 	ret |= endswith( haystack, needle );
     }
-    free( haystack );
-    free( needle );
+    g_free( haystack );
+    g_free( needle );
     return ret;
 }
 
@@ -1007,7 +1034,7 @@ int u_endswith(const unichar_t *haystack,const unichar_t *needle) {
 
 int u_startswith(const unichar_t *haystack,const unichar_t *needle) {
 
-    if( !haystack || !needle ) 
+    if( !haystack || !needle )
 	return 0;
 
     unichar_t* p = u_strstr( haystack, needle );

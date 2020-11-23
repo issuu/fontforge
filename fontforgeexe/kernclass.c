@@ -24,12 +24,22 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "autowidth2.h"
 #include "fontforgeui.h"
-#include <gkeysym.h>
-#include <string.h>
-#include <ustring.h>
-#include <utype.h>
+#include "fvfonts.h"
+#include "gkeysym.h"
+#include "lookups.h"
+#include "splinefill.h"
+#include "splineutil.h"
+#include "tottfgpos.h"
+#include "ustring.h"
+#include "utype.h"
+
 #include <math.h>
+#include <string.h>
 
 extern GBox _ggadget_Default_Box;
 #define ACTIVE_BORDER   (_ggadget_Default_Box.active_border)
@@ -647,7 +657,7 @@ static void KCD_UpdateGlyphFromName(KernClassDlg *kcd,int which,char* glyphname)
     SplineChar **possc = which==0 ? &kcd->scf : &kcd->scs;
     SplineChar *sc;
     void *freetypecontext=NULL;
-    printf("KCD_UpdateGlyphFromName() which:%d iskp:%d\n", which, kcd->iskernpair);
+//    printf("KCD_UpdateGlyphFromName() which:%d iskp:%d\n", which, kcd->iskernpair);
 
     char* localglyphname = copy( glyphname );
     char* p = 0;
@@ -675,7 +685,7 @@ static void KCD_UpdateGlyphFromName(KernClassDlg *kcd,int which,char* glyphname)
 	*scpos = SplineCharAntiAlias(sc,kcd->layer,kcd->pixelsize,4);
     }
 
-    printf("KCD_UpdateGlyph() scpos:%p\n", *scpos );
+//    printf("KCD_UpdateGlyph() scpos:%p\n", *scpos );
 }
 
 static void KCD_UpdateGlyph(KernClassDlg *kcd,int which) {
@@ -1839,8 +1849,8 @@ static int kcd_e_h(GWindow gw, GEvent *event) {
       break;
       case et_char:
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help(kcd->iskernpair ?  "metricsview.html#kernpair":
-				    "metricsview.html#kernclass");
+	    help("ui/mainviews/metricsview.html", kcd->iskernpair ?  "#metricsview-kernpair":
+				    "#metricsview-kernclass");
 return( true );
 	}
 return( false );
@@ -2479,15 +2489,15 @@ static int AddClassList(GGadgetCreateData *gcd, GTextInfo *label, int k, int off
     label[k].text_in_resource = true;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.pos.x = gcd[k-3].gd.pos.x+5; gcd[k].gd.pos.y = gcd[k-1].gd.pos.y+26+4;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Select the class containing the named glyph");
+    gcd[k].gd.flags = gg_visible | gg_enabled;
+    gcd[k].gd.popup_msg = _("Select the class containing the named glyph");
     gcd[k++].creator = GLabelCreate;
     harray[0] = &gcd[k-1];
 
     gcd[k].gd.pos.x = gcd[k-1].gd.pos.x+100; gcd[k].gd.pos.y = gcd[k-1].gd.pos.y-4;
     gcd[k].gd.pos.width = 80;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Select the class containing the named glyph");
+    gcd[k].gd.flags = gg_visible | gg_enabled;
+    gcd[k].gd.popup_msg = _("Select the class containing the named glyph");
     gcd[k].gd.handle_controlevent = KCD_TextSelect;
     gcd[k].gd.cid = CID_ClassSelect+off;
     gcd[k].gd.u.completion = KCD_GlyphCompletion;
@@ -2639,8 +2649,8 @@ static void FillShowKerningWindow(KernClassDlg *kcd, GGadgetCreateData *left,
     label[k].text = (unichar_t *) _("Revert Kerning");
     label[k].text_is_1byte = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.flags = gg_visible|gg_enabled|gg_utf8_popup ;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Resets the kerning offset and device table corrections to what they were originally");
+    gcd[k].gd.flags = gg_visible|gg_enabled;
+    gcd[k].gd.popup_msg = _("Resets the kerning offset and device table corrections to what they were originally");
     gcd[k].gd.handle_controlevent = KCD_RevertKerning;
     gcd[k].gd.cid = CID_Revert;
     gcd[k++].creator = GButtonCreate;
@@ -2649,8 +2659,8 @@ static void FillShowKerningWindow(KernClassDlg *kcd, GGadgetCreateData *left,
     label[k].text = (unichar_t *) _("Clear Device Table");
     label[k].text_is_1byte = true;
     gcd[k].gd.label = &label[k];
-    gcd[k].gd.flags = gg_visible|gg_enabled|gg_utf8_popup ;
-    gcd[k].gd.popup_msg = (unichar_t *) _("Clear all device table corrections associated with this combination");
+    gcd[k].gd.flags = gg_visible|gg_enabled;
+    gcd[k].gd.popup_msg = _("Clear all device table corrections associated with this combination");
     gcd[k].gd.cid = CID_ClearDevice;
     gcd[k].gd.handle_controlevent = KCD_ClearDevice;
     gcd[k++].creator = GButtonCreate;
@@ -2915,8 +2925,8 @@ return;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
 	gcd[i].gd.pos.x = 5; gcd[i].gd.pos.y = 5+4;
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
-	gcd[i].gd.popup_msg = (unichar_t *) _(
+	gcd[i].gd.flags = gg_enabled|gg_visible;
+	gcd[i].gd.popup_msg = _(
 	    "Add entries to the lookup trying to make the optical\n"
 	    "separation between all pairs of glyphs equal to this\n"
 	    "value." );
@@ -2929,7 +2939,7 @@ return;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
 	gcd[i].gd.pos.width = 50;
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[i].gd.flags = gg_enabled|gg_visible;
 	gcd[i].gd.popup_msg = gcd[i-1].gd.popup_msg;
 	gcd[i].gd.cid = CID_Separation;
 	gcd[i].creator = GTextFieldCreate;
@@ -2940,8 +2950,8 @@ return;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
 	gcd[i].gd.pos.x = 5; gcd[i].gd.pos.y = 5+4;
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
-	gcd[i].gd.popup_msg = (unichar_t *) _(
+	gcd[i].gd.flags = gg_enabled|gg_visible;
+	gcd[i].gd.popup_msg = _(
 	    "Any computed kerning change whose absolute value is less\n"
 	    "that this will be ignored.\n" );
 	gcd[i].creator = GLabelCreate;
@@ -2953,7 +2963,7 @@ return;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
 	gcd[i].gd.pos.width = 50;
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[i].gd.flags = gg_enabled|gg_visible;
 	gcd[i].gd.popup_msg = gcd[i-1].gd.popup_msg;
 	gcd[i].gd.cid = CID_MinKern;
 	gcd[i].creator = GTextFieldCreate;
@@ -2964,10 +2974,10 @@ return;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
 	gcd[i].gd.pos.x = 5; gcd[i].gd.pos.y = 5+4;
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[i].gd.flags = gg_enabled|gg_visible;
 	if ( kc->subtable->kerning_by_touch )
-	    gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup|gg_cb_on;
-	gcd[i].gd.popup_msg = (unichar_t *) _(
+	    gcd[i].gd.flags = gg_enabled|gg_visible|gg_cb_on;
+	gcd[i].gd.popup_msg = _(
 	    "Normally kerning is based on achieving a constant (optical)\n"
 	    "separation between glyphs, but occasionally it is desirable\n"
 	    "to have a kerning table where the kerning is based on the\n"
@@ -2989,10 +2999,10 @@ return;
 	label[i].text_is_1byte = true;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[i].gd.flags = gg_enabled|gg_visible;
 	if ( kc->subtable->onlyCloser )
-	    gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup|gg_cb_on;
-	gcd[i].gd.popup_msg = (unichar_t *) _(
+	    gcd[i].gd.flags = gg_enabled|gg_visible|gg_cb_on;
+	gcd[i].gd.popup_msg = _(
 	    "When doing autokerning, only move glyphs closer together,\n"
 	    "so the kerning offset will be negative.");
 	gcd[i].gd.cid = CID_OnlyCloser;
@@ -3003,10 +3013,10 @@ return;
 	label[i].text_is_1byte = true;
 	label[i].text_in_resource = true;
 	gcd[i].gd.label = &label[i];
-	gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup;
+	gcd[i].gd.flags = gg_enabled|gg_visible;
 	if ( !kc->subtable->dontautokern )
-	    gcd[i].gd.flags = gg_enabled|gg_visible|gg_utf8_popup|gg_cb_on;
-	gcd[i].gd.popup_msg = (unichar_t *) _(
+	    gcd[i].gd.flags = gg_enabled|gg_visible|gg_cb_on;
+	gcd[i].gd.popup_msg = _(
 	    "When adding a new class provide default kerning values\n"
 	    "Between it and every class with which it interacts.");
 	gcd[i].gd.cid = CID_Autokern;
@@ -3289,7 +3299,7 @@ static int kcl_e_h(GWindow gw, GEvent *event) {
 	GDrawDestroyWindow(kcld->gw);
     } else if ( event->type==et_char ) {
 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
-	    help("metricsview.html#kernclass");
+	    help("ui/mainviews/metricsview.html", "#metricsview-kernclass");
 return( true );
 	}
 return( false );

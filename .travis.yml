@@ -1,40 +1,168 @@
 language: c
 compiler: gcc
-sudo: required
-dist: trusty
+sudo: false
+dist: xenial
+osx_image: xcode10.1
+
 branches:
   only:
     - master
-os:
-  - linux
-  - osx
-
-before_install: ./travis-scripts/before_install_${TRAVIS_OS_NAME}.sh
-install:        ./travis-scripts/install_${TRAVIS_OS_NAME}.sh
-script:         ./travis-scripts/script_${TRAVIS_OS_NAME}.sh
+    - travis
+    - coverity_scan
 
 env:
   global:
-  - secure: "J+P8zdYyxQ4vb//RdlGG16zzXJowpTQFe83FOCFQ/i92g/vpMH69/5yU5Tw6lBW/VXT39eyRYfs5jO/qGLWdCs6RcOJjF2S0IsuqhZ3iGmFvewyneqd7T2WTC3GuZkifljK/CzvV8JoN0Yb+WFUfB5vEHTbuHByWeCKCGAwq/hA="
-  - secure: "Uoxkpn1xSa0dP8ijk7QLde4UeeLCgWtQkogiUEdABTcmGda4fSzqc42t5EKqbYp3nDCh6I23JYgDKdVAdGE5XQexkY0ZWplAkhl0Vx97o1NQIuiKizrNIaZiYHdnJtF0yh6zIWQVJLMUpaEJvMSo9CK+EMjYhj+JyHjrEgWR73Q="
-  - secure: "NaQ7ksxpoqNx/5B/n5IrB7Q0G8b1XNJmN0xVRddcExBVjiv7RRcZ0QxtaIi47xOghkZe61TBdZUo7V+g5jiZr2RxyZho89OMwZKOisx091LWAeBCBf321e9geY87pNSOm2Xt/VG4xLzUzkysVAnRXuX2ykONPzgQZ89Qg2q/s5E="
-  - secure: "ZhrAt6f4Y6h2FOIY9bNa63lPkDpy8nzWBAksDg0zLpata2yNimj+WmMIccVGblGufjGj7LRYFvWWC3pmLLEj8Dh5eFUqWcsGMiKOdlMo3dLj4jWI8KDjF5S+lOno4XdIy0HZGsSnanopz+eFrlh9ECqaif02pnZO2K2qY/jHpIs="
-  - secure: "A+bKOKww+KG9gGV1tAVKfQnvUwe/2UQfu7Q2BPisWtJMQnUzPK68eI2RZZuL3IGIWG2aw1dRrXv3UngAkW+PDx1kS0TJHbcC23gawDqsdremppT1NXLFfoQ21YWZWvNuwgypzqbsn2PqSSiodqFrIoQzYPG8SjOQe1+JGY8ifk8="
-  - secure: "DuVz1uTLJkRpHTh2rHJ4NRdVsGOKTpmFp8t44lAB0c82MsZI63ypCgeBzYelTkhn+ZZRgxmoFU7K5bZxHvgyyhAd8qBt7zVZEKgk8RdBKoWdChTYIjorvIb/ULPipWJWu+dU+jDs83IMxbMgWKL8jEUoxibIeHSTU4wk/WZp5ng="
-  - secure: "B8/wEHBbg0RgjQjMCdLMA53/CKfh4VM8hBm1i8oRRCHUV50tHuW4MIwwP6g6pcTfrkDsWJzlGGvDaV38PlHc85rBmLeen8j/j9nNgZQd62Z+2VyVPDR8l+HyKWLjR9dw9Z2W+mjSPElMpT961GbZTqXXTiSf8zvz6Om9vVuZ3O8="
-  - secure: "EJApLWIV71ApIn5I/FdnAxBCLwxQINVQkEBy3RjJvVagsTjqPkHieOQLSz1Chjf7nsC6PF/4N5FfXSY0PbykyltTkRK7eOjSVOsHvyY7yv8nZ/lF4ybHPrKGlONwwJmt55/qelk/DjRO3/xYgjwaVG1ceTczhGA5dHmod44PYx8="
-  - secure: "UiruhB4vmra3GIrGAxyva+3LJZUziAHFyACG2qPCofgaF9YLqu1RWp1iF2WZVIqJROtM10nEo0Vrxsm5ArFlbZ7n+ajLC81BGn1QrppnQFmvT3tCDum7+rcnK+Zb5bOehocH7TVFjrfkGK0BxtYOorfpKNnSyD+ZSeYXpZJrftw="
-  - secure: "R3KnxSiB/RqQR15hG5qqzoqEl7KZmprs3TFEFJQLHBPWJEklQnUsLH9sfmOtTqVNUF+rYno5+urYH5anxDUVlPSqvhp0MPyv2PIi8LbUh2ZJSx6+IzdgdU/+oQAUoltLIum9p69UUtrwfQQGKhqp256a1L3PfL39FcjdIUPib9E="
-  - secure: "VVf6xMWBbTNXfWJHNce/OAfLK4IyVmaw8pqlnZpvyj91y+JPVdIOAyQDv+B/2IekVaO5X3BIkwYEPUSnRcv+34xwsN0kFBM3oacCUDLAg0KF5HNdU1YprWcANm1cwuMLvIKco4iqC5CvXzG9sKnhegnHeQiphpcNOALN9afB+aU="
-  - secure: "PwjUMp56CuXQB0H7WqIh5Aj5GNlWYSQBMkb8MuZj2j8L+YxrGBbJ8e3V0BjdBH5+c/HCPaW4jZw2cuOvNRLAVYUSOgXIboJnXiMKBohdBDHjgDhb4DhbgobktdXqf5wWrQgTX44NJjFzsZUadMJ/1UgObHsn7a/CP5WjRDFwkwY="
-  - secure: "L2T+y/T8NkA+x6/dd0L7bkgk+e+Wss0R33W0EH7F60cvodoC1B6i22K9Q1T9e99+2Is1H7Inur4VUmts69/np3HYzWKW2GtPAnGJTLlGffjJz4CIuHJp+U8cOMvyMzq3llHtP4tosFKhF0fFjSpQKekCxEYgd1HgVu2sl0sFRjA="
-  - secure: "Ab3I8s1kbvbs7dG1JRK3H4YdkqlfuP9urQ1o1CISVhVMepl9oz3NpIdAVn6huI2W1dL6qkvmPVlDMEwteoYChgTCk666KUZdmHwSjcxL1ipYMWlYPb0BeMczIPrl04x84uEPGVfC5/kO15eSdc/1oF4Smsvi6CnY5HxRzbg5tfY="
-  - secure: "Ic5uV+CPtiU1LDYfkNhI/H1dt/D4vIuVazzsF57yUzo0/5pO50zqsxvNpumFjOkkzedCa/T5h2foGWdPqxkvC18clapTUH3eMTQqGmhM+OoPkK5nB6lM9ID1GdRGZDtWM34Ny+RbykaTX7k1fzy9zho0FUIpLlQPg80GjAp5x44="
-  - secure: "ZnVvk7I5rkfkywD+mk/GRSI+T3Yv+sH/Cmfv7pcZj5pqOW4+F2zaN7AlTf1p6Z617yxZLnPloxzuJwaFxuDsix6cleSpTfoLzBgiDESjYrNpTNzItmRqCvHzeHb7io1k4njeIzSZ42qSRjqYTtyn+CS9tGu5nnCEEWQvKw9jwxE="
-  - secure: "e7kaADE/UPf04vGDFx0eypl6n7OTLgUMBtssACE0EJiUe26wOTVM0T+2JgfrKpQcQKNcPw/8HYmQBnTYc/i+fRoQVUMqPOsUed0EsRwjYMjQzHXrf+V5O5f9L/mzfuE1zaUNsuTPDuwHsD4waTzkZAeu7ObFUu4GfL7UGqWq6BI="
-  - secure: "F7gduNOjzAoPn0FhIAKnex5U+6BMCMhK3SCs3rzfYRpwpfLXZCHMTkoSNPkqGvdpIzHltXmp1wZNZTz6UYfLZpFHS38vAfpadd8gx0MtMZHsJXAvBMC1o/3izk5AA58ftcgCursJXnLog3N5+S7Rp+jb+2n5LTEsUpAgigxjxbw="
-  - secure: "F1NVl9vjOdJVqg+IUB8t2yj605cVpfoBWDw4KmAnZiaAf++/v928w1dS4d/Fn6dH7aOoyCUCgIvqABj/FXIykA/glINcgF82mWBjiWQJT3NiyZIF3s0zPxobuLAPJxNS7CjllxcVlot6YgYnU3GRn1GwXqYFt6hsYF/7d/he86M="
-  - secure: "Rfatn2LFHIoLdRyO6lFlb++t7WokONvICAZs1aOLu7bnz3K/3SLE0xp56fwh4MY/6a2LJ8Wa+egb3N/UpD+9Yin6wBs0i1Vj7zwC5uhu4DO3Zbs2ZhA6eE6iMaskIudZFShTTimyLKHamu2dyG6T2o5x+n5BxeZx5Z6WGzNpWiI="
-  - secure: "OwMuJ31SpkXMySb0jjLAHQb3P/MtiYRUBc0uLsqAyUd37mDJD84yk3SO5i15MsEcl719Sslzz9VRfx1wk3kG+po7+McigwP2U2e1TkG0UCU5S88jp08xKKDDIHMDKt7WycV//OG9DcrsdE3prky1fQOLUObWIXUN1k7V57sAmRk="
-  - secure: "Sp2HtQNQnt8e8dH9TYiB6j9yTuT7fMjgDvxQvvIupfyOz+ZB6sMYSs9xmIb50yR4x2f5IitdRoQ6AremetNt5X0YZSiwaO3Vlmw1KcJNLEDbfevO8GrdDLNbO4dcRPragXQEg/z5bqBvs1zntsedBFuwW7Wj71GYaIpgxb0Mk4k="
-  - secure: "JVwlvKJX70bUt45nfLfVTC4UM0plJ2K1aW2J7svi0qTl3YhgPfj9r+SPCYJPe6oRHAoTrZ6vEpQbGDPyH1zDm27PIR9cnvRJiX7FKzGhOMvxfVi2DVvHNjQTfzbBIunWy3upiAhm69EfhIuc5+TIJ2B7tThru6ZuN3LO99WT2Ro="
+    - CMAKE=cmake
+    - CTEST_PARALLEL_LEVEL=100
+    # For Coverity
+    - secure: "MeTS1Pqa5gzx1nn/peW/9a5kq84bba3XYUljOfkCUqzuyGiERk/nmok+RW7skrgzboBlKxnNG8+ykKqHMwK9s9M83ezFxvEWXBcKEpmEQKkqXPI5hpMs6jGLTgpeuheSIzqHA3danV8iircp1GOiTLWA0pt/AOsNLZiaYBh0OiE="
+    # For Crowdin
+    - secure: "bvU1qkor+TQPr6LXxlQ6w2hwdLIXkEh+QWhipjmKLU0Aj59sGF4+U9uVLP/QbGNulDiwUanVCSV7QZhi1HKKB4rVDVlyhzOQvHU+67dQDB4CKDlezp4TKhVoHcpP7MerSdQ02wr45VbwOITAKpvicdBKwb5x/p1v8HsO25UbJlE="
+
+
+matrix:
+  include:
+    - os: linux
+      env:
+        - LINUX_NOX=true
+        - CMAKE=/usr/bin/cmake # Make sure at least one build uses CMake 3.5
+    - os: linux
+      env: LINUX_FULL=true
+    - os: linux
+      env:
+        - LINUX_RELEASE=true
+        - BINTRAY_DEPLOY=true
+    - os: osx
+      env:
+        - OSX_ONLY=true
+        - BINTRAY_DEPLOY=true
+        - PYTHON=python3
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+      - deadsnakes
+    packages: [autoconf, automake, autotools-dev, bzip2, gcc-8, g++-8, libtool,
+      libjpeg-dev, libtiff5-dev, libpng12-dev, libfreetype6-dev, libgif-dev,
+      libx11-dev, libgtk-3-dev, libxml2-dev, libpango1.0-dev, libcairo2-dev, python3.7-dev,
+      libbrotli-dev, ninja-build, cmake, lcov, python3.7-venv]
+  coverity_scan:
+    project:
+      name: "fontforge/fontforge"
+      description: "Free (libre) font editor for Windows, Mac OS X and GNU+Linux"
+    build_command_prepend: cov-configure --comptype gcc --compiler $CC --template && mkdir build && pushd build && cmake $FFCONFIG .. && popd
+    build_command: make -C build -j4
+    branch_pattern: coverity_scan
+    notification_email: jtanx_blackhole@outlook.com
+
+cache:
+  directories:
+    - $TRAVIS_BUILD_DIR/travisdeps
+
+before_install:
+  - if [ ! -z "$LINUX_FULL" ]; then pip --quiet install --user cpp-coveralls -U ; fi
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/uninstall)" -- --force; sudo rm -rf ~/.rvm; fi
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then git config --global protocol.version 1 && /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"; fi
+
+install:
+  - |
+    set -e
+    export PREFIX=$TRAVIS_BUILD_DIR/target
+    export DEPSPREFIX=$TRAVIS_BUILD_DIR/travisdeps
+    export PATH=$PATH:$DEPSPREFIX/bin:$PREFIX/bin
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$DEPSPREFIX/lib:$PREFIX/lib
+    export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$DEPSPREFIX/lib/pkgconfig
+    export FFCONFIG="-DCMAKE_INSTALL_PREFIX=$PREFIX -DENABLE_FONTFORGE_EXTRAS=ON"
+
+    if [ ! -z "$LINUX_FULL" ] ; then
+      export FFCONFIG="$FFCONFIG -DENABLE_X11=ON -DENABLE_CODE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_DOCS=ON -DSPHINX_USE_VENV=ON"
+    elif [ ! -z "$LINUX_NOX" ]; then
+      export FFCONFIG="$FFCONFIG -DENABLE_GUI=OFF -DENABLE_PYTHON_SCRIPTING=OFF"
+    fi
+
+    if [ "$TRAVIS_OS_NAME" == "linux" ]; then
+      export FTVER=`dpkg -s libfreetype6-dev | perl -ne 'print $1 if /^Version: (\d+(?:\.\d+)+)/'`
+      export SFFTVER=`echo $FTVER | perl -ne 'print $1 if /^(\d+(?:\.\d+){1,2})/'`
+      export FFCONFIG="$FFCONFIG -DENABLE_FREETYPE_DEBUGGER=$DEPSPREFIX/freetype-$FTVER"
+      export CC=gcc-8
+      export CXX=g++-8
+      export GCOV=gcov-8
+
+      # This block only runs if the cache isn't present.
+      if [ ! "$(ls -A $DEPSPREFIX)" ]; then
+        mkdir -p work && pushd work
+        git clone --depth 1 https://github.com/fontforge/libspiro
+        git clone --depth 1 https://github.com/fontforge/libuninameslist
+        git clone --depth 1 --branch v1.0.2 https://github.com/google/woff2
+        wget --tries 1 "http://download.savannah.gnu.org/releases/freetype/freetype-$FTVER.tar.gz" || \
+          wget "https://sourceforge.net/projects/freetype/files/freetype2/$SFFTVER/freetype-$FTVER.tar.gz"
+        wget https://downloads.crowdin.com/cli/v2/crowdin-cli.zip
+
+        pushd libspiro && autoreconf -fiv && ./configure --prefix=$DEPSPREFIX && make -j4 && make install && popd
+        pushd libuninameslist && autoreconf -fiv && ./configure --enable-pscript --prefix=$DEPSPREFIX && make -j4 && make install && popd
+        pushd woff2 && mkdir build && cd build && cmake -GNinja .. -DCMAKE_INSTALL_PREFIX=$DEPSPREFIX -DCMAKE_INSTALL_LIBDIR=lib && ninja install && popd
+        tar -zxf freetype-$FTVER.tar.gz -C $DEPSPREFIX
+        mkdir crowdin && pushd crowdin && unzip ../crowdin-cli.zip && mv */* . && mv crowdin-cli.jar $DEPSPREFIX && popd
+        popd
+      fi
+
+      # These are FF-specific mods (set here so it runs also in Coverity)
+      export CFLAGS="$CFLAGS -fdiagnostics-color=always -Wall -Wno-switch -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wrestrict -Wnull-dereference -Wjump-misses-init -Wdouble-promotion -Wshadow"
+      export PYTHON=python3.7
+    else
+      export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig:/usr/local/opt/libffi/lib/pkgconfig
+      export PATH="/usr/local/opt/ruby/bin:/usr/local/opt/gettext/bin:$PATH"
+      export HOMEBREW_NO_AUTO_UPDATE=1
+      export FFCONFIG="$FFCONFIG -DCMAKE_FIND_ROOT_PATH=/usr/local/opt/gettext"
+      # Disable fc-cache on fontconfig install. Because it's slow.
+      sed -i.bak '/fc-cache/d' "$(brew --prefix)/Homebrew/Library/Taps/homebrew/homebrew-core/Formula/fontconfig.rb"
+      # 10 billion years later...
+      brew install autoconf automake libtool pkg-config ruby cmake ninja
+      brew install cairo coreutils fontconfig gettext giflib gtk+3 jpeg libpng libspiro libtiff libtool libuninameslist python@3 wget woff2
+    fi
+
+    # Don't specify the prefix in the prefix='' argument else you get different results...
+    export PYTHONPATH=$PREFIX/$($PYTHON -c "import distutils.sysconfig as sc; print(sc.get_python_lib(prefix='', plat_specific=True,standard_lib=False))")
+    if [ "$TRAVIS_OS_NAME" == "osx" ]; then set +e; fi
+
+script:
+  - $CMAKE --version
+  - mkdir build && pushd build && $CMAKE -GNinja $FFCONFIG .. && popd
+  - ninja -C build install
+  - ninja -C build check
+  - if [ ! -z "$LINUX_FULL" ]; then ninja -C build dist; fi
+  - if [ -z "$LINUX_NOX" ]; then $PYTHON travis-scripts/pyhook_smoketest.py; fi
+  - if [ "$TRAVIS_OS_NAME" == "osx" ] && [ "$TRAVIS_PULL_REQUEST" == "false" ]; then ninja -C build macbundle; fi
+  - |
+    if [ ! -z "$LINUX_RELEASE" ]; then
+      ninja -C build potfiles
+      DESTDIR=build/appdir $CMAKE -DCMAKE_INSTALL_PREFIX=/usr -P build/cmake_install.cmake
+      travis-scripts/ffappimagebuild.sh build/appdir $TRAVIS_COMMIT
+    fi
+
+after_success:
+  - if [ ! -z "$LINUX_FULL" ]; then coveralls -b build --gcov-options '\-bulp' --gcov $(which $GCOV); fi
+  - if [ ! -z "$LINUX_RELEASE" ] && [ "$TRAVIS_PULL_REQUEST" == "false" ] && [ "$TRAVIS_BRANCH" == "master" ]; then java -jar $DEPSPREFIX/crowdin-cli.jar -c .crowdin.yml upload; fi
+
+after_failure:
+  - which $PYTHON
+  - env
+  - cat build/CMakeCache.txt || true
+  - cat build/CMakeFiles/CMakeOutput.log || true
+  - cat build/Testing/Temporary/LastTest.log || true
+  - cat build/build.ninja || true
+
+deploy:
+  provider: bintray
+  file: "travis-scripts/bintray_descriptor.json"
+  user: "fontforge-ci-bot"
+  dry-run: false
+  skip_cleanup: true
+  key:
+    secure: "YBvK5QLZ4LNE3WQPXjDYalLsTgmiGyRGYY87ep5knQ0YGyt3Q9OiBCtQ3GvhHNKOa2L2QlctJi2VWcUu+ftrS72mi5j2tvse9wRF3V8EVFIPb3bxjnN6E11FjXtLIqU8WR7HlAHJpOL2bhO+RleIhSVZm0MsiSjekFOoA5tfll4="
+  on:
+    condition: '"$BINTRAY_DEPLOY" = "true"'
+    branch:
+      - master
+      #- travis

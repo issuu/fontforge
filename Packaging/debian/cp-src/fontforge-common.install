@@ -1,4 +1,5 @@
-debian/fontforge.xpm		usr/share/pixmaps/
-desktop/icons/*		usr/share/icons/
-usr/share/locale/*
 usr/share/fontforge/*
+usr/share/icons/*
+usr/share/locale/*
+usr/share/mime/*
+usr/share/pixmaps/*

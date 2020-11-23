@@ -24,9 +24,12 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
 #include "gdraw.h"
-#include "gresource.h"
 #include "ggadgetP.h"
+#include "gresource.h"
 #include "ustring.h"
 
 static GBox scrollbar_box = GBOX_EMPTY; /* Don't initialize here */
@@ -324,8 +327,8 @@ return( false );
 	    GDrawCancelTimer(gsb->pressed); gsb->pressed = NULL;
 	    int isv = event->u.mouse.button<=5;
 	    if ( event->u.mouse.state&ksm_shift ) isv = !isv;
-	    if ( isv != g->vert )
-return( false );	/* Only respond to scrolling events in our direction */
+	    if ( !isv && g->vert )
+return( false );	/* Allow horizontal scrolling with normal scroll but not vice versa */
 	    else if ( event->u.mouse.state&ksm_control )
 return( false );
 	    if ( event->u.mouse.button==5 || event->u.mouse.button==7 ) {
@@ -520,8 +523,7 @@ static void GScrollBarFit(GScrollBar *gsb) {
     minheight = 2*(gsb->thumbborder+gsb->arrowsize) + GDrawPointsToPixels(gsb->g.base,2);
 
     if ( gsb->g.vert ) {
-	if ( gsb->g.r.width==0 )
-	    gsb->g.r.width = GDrawPointsToPixels(gsb->g.base,_GScrollBar_Width);
+	gsb->g.r.width = GDrawPointsToPixels(gsb->g.base,_GScrollBar_Width);
 	if ( gsb->g.r.height< minheight )
 	    gsb->g.r.height = minheight;
 	gsb->g.inner.x = gsb->g.r.x+gsb->sbborder;
@@ -529,8 +531,7 @@ static void GScrollBarFit(GScrollBar *gsb) {
 	gsb->g.inner.y = gsb->g.r.y+gsb->arrowsize;
 	gsb->g.inner.height = gsb->g.r.height - 2*gsb->arrowsize;
     } else {
-	if ( gsb->g.r.height==0 )
-	    gsb->g.r.height = GDrawPointsToPixels(gsb->g.base,_GScrollBar_Width);
+	gsb->g.r.height = GDrawPointsToPixels(gsb->g.base,_GScrollBar_Width);
 	if ( gsb->g.r.width< minheight )
 	    gsb->g.r.width = minheight;
 	gsb->g.inner.x = gsb->g.r.x+gsb->arrowsize;

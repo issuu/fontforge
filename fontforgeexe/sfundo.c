@@ -26,10 +26,16 @@
 *******************************************************************************
 ******************************************************************************/
 
+#include <fontforge-config.h>
+
 #include "sfundo.h"
-#include "views.h"
-#include <string.h>
+
+#include "fvfonts.h"
+#include "sfd.h"
 #include "uiinterface.h"
+#include "views.h"
+
+#include <string.h>
 
 void SFUndoFreeAssociated( struct sfundoes *undo )
 {
@@ -146,7 +152,7 @@ void SFUndoPerform( SFUndoes* undo, SplineFont* sf )
     switch(undo->type) {
     case sfut_fontinfo:
 	sfdchunk = undo->sfdchunk;
-	printf("font level undo, font info sfd:%s\n", sfdchunk );
+//	printf("font level undo, font info sfd:%s\n", sfdchunk );
 	sfd = MakeTemporaryFile();
 	fwrite( sfdchunk, strlen(sfdchunk), 1, sfd );
 	fseek( sfd, 0, SEEK_SET );

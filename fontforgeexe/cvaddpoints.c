@@ -24,10 +24,19 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
-#include <math.h>
+#include "spiro.h"
 #include "splinefont.h"
+#include "splineorder2.h"
+#include "splineutil.h"
+#include "splineutil2.h"
 #include "ustring.h"
+
+#include <math.h>
 
 int CVOneThingSel(CharView *cv, SplinePoint **sp, SplinePointList **_spl,
 	RefChar **ref, ImageList **img, AnchorPoint **ap, spiro_cp **scp) {
@@ -264,6 +273,32 @@ return( found!=NULL );
     }
 }
 
+// Return type: index into spiro_cp array, or -1 if not found.
+static int CVSpiroSelected(CharView *cv, SplineSet *ss) {
+    int i, j = 0;
+    bool found = false;
+    for (i = 0; i < ss->spiro_cnt; i++) {
+        if (SPIRO_SELECTED(&ss->spiros[i])) {
+            j = i;
+            found = true;
+        }
+    }
+    if (!found) {
+        TRACE("CVSpiroSelected: We expected to find a selected spiro, but failed to.\n");
+        return -1;
+    }
+    TRACE("CVSpiroSelected: %d\n", j);
+    return j;
+}
+
+// If needed, reset the selected spiro.
+static void CVResetSelSpiro(CharView* cv, SplineSet *ss) {
+    if (CVInSpiro(cv)) {
+        int sel = CVSpiroSelected(cv, ss);
+        cv->p.spiro = cv->lastselcp = cv->active_cp = sel == -1 ? NULL : &ss->spiros[sel];
+    }
+}
+
 static void CVMergeSPLS(CharView *cv,SplineSet *ss, SplinePoint *base,SplinePoint *sp) {
     int order2 = cv->b.layerheads[cv->b.drawmode]->order2;
 
@@ -404,6 +439,8 @@ return;			/* We clicked on the active point, that's a no-op */
 
     cv->active_spl = ss;
     cv->active_cp = cp;
+    // We may have reallocated the spiros (above), so we need to reset the selected spiro.
+    CVResetSelSpiro(cv, ss);
     CVSetCharChanged(cv,true);
     CVInfoDraw(cv,cv->gw);
     SCUpdateAll(sc);
@@ -649,15 +686,16 @@ void CVMergeSplineSets(CharView *cv, SplinePoint *active, SplineSet *activess,
 	    spl->next = mergess->next;
 	}
 	if ( activess->spiros && mergess->spiros ) {
-	    if ( activess->spiro_cnt+mergess->spiro_cnt > activess->spiro_max )
-		activess->spiros = realloc(activess->spiros,
-			(activess->spiro_max = activess->spiro_cnt+mergess->spiro_cnt)*sizeof(spiro_cp));
+	    if ( activess->spiro_cnt+mergess->spiro_cnt > activess->spiro_max ) {
+	        activess->spiros = realloc(activess->spiros, (activess->spiro_max = activess->spiro_cnt+mergess->spiro_cnt)*sizeof(spiro_cp));
+	    }
 	    memcpy(activess->spiros+activess->spiro_cnt-1,
 		    mergess->spiros+1, (mergess->spiro_cnt-1)*sizeof(spiro_cp));
 	    activess->spiro_cnt += mergess->spiro_cnt-2;
-	} else
+	} else {
 	    SplineSetSpirosClear(activess);
-	SplinePointListMDFree(cv->b.sc,mergess);
+	}
+	SplinePointListMDFree(cv->b.sc,mergess); // frees mergess
     }
     if (( active->pointtype==pt_curve || active->pointtype==pt_hvcurve ) &&
 	    !active->nonextcp && !active->noprevcp &&
@@ -665,6 +703,8 @@ void CVMergeSplineSets(CharView *cv, SplinePoint *active, SplineSet *activess,
 	    !BpColinear(&active->prevcp,&active->me,&active->nextcp))
 	active->nextcpdef = active->prevcpdef = true;
     SplineSetJoinCpFixup(active);
+    // We may have reallocated the spiros, so we need to reset the selected spiro.
+    CVResetSelSpiro(cv, activess);
 }
 
 static void CVMouseMoveSpiroPoint(CharView *cv, PressedOn *p) {

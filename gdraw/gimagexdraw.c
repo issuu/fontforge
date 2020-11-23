@@ -24,9 +24,14 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef X_DISPLAY_MISSING
-#include "gxdrawP.h"
+
+#include <fontforge-config.h>
+
+#if !defined(X_DISPLAY_MISSING) && !defined(FONTFORGE_CAN_USE_GDK)
+
 #include "gxcdrawP.h"
+#include "gxdrawP.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -2024,7 +2029,6 @@ return;
 		x,y, src->width, src->height );
 	XSetFunction(display,gc,GXcopy);
 	gdisp->gcstate[gw->ggc->bitmap_col].fore_col = COLOR_UNKNOWN;
-	gdisp->gcstate[gw->ggc->bitmap_col].func = df_copy;
     } else { /* no mask */
 	XPutImage(display,w,gc,gdisp->gg.img,0,0,
 		x,y, src->width, src->height );
@@ -2032,102 +2036,6 @@ return;
     
     if (blended != NULL)
         GImageDestroy(blended);
-}
-
-void _GXDraw_TileImage( GWindow _w, GImage *image, GRect *src, int32 x, int32 y) {
-    struct _GImage *base = image->list_len==0?image->u.image:image->u.images[0];
-
-#ifndef _NO_LIBCAIRO
-    if ( _w->usecairo ) {
-	_GXCDraw_TileImage((GXWindow) _w,image,src,x,y);
-return;
-    }
-#endif
-    if ( src->x/base->width == (src->x+src->width-1)/base->width &&
-	    src->y/base->height == (src->y+src->height-1)/base->height ) {
-	/* Ok, the exposed area is entirely covered by one instance of the image*/
-	int newx = src->x, newy = src->y;
-	GRect newr;
-	newr.x = (src->x-x)%base->width; newr.y = (src->y-y)%base->height;
-	newr.width = src->width; newr.height = src->height;
-	_GXDraw_Image(_w,image,&newr,newx,newy);
-    } else if ( base->trans==COLOR_UNKNOWN || base->image_type==it_mono ) {
-	GWindow pixmap;
-	GXWindow gw = (GXWindow) _w;
-	GXDisplay *gdisp = gw->display;
-	Display *display=gdisp->display;
-	Window w = gw->w;
-	GC gc = gdisp->gcstate[gw->ggc->bitmap_col].gc;
-	GRect full, old;
-	int i,j;
-
-	full.x = full.y = 0; full.width = base->width; full.height = base->height;
-	pixmap = GDrawCreatePixmap((GDisplay *) gdisp,base->width,base->height);
-	_GXDraw_Image(pixmap,image,&full,0,0);
-	GDrawPushClip(_w,src,&old);
-	_GXDraw_SetClipFunc(gdisp,gw->ggc);
-	for ( i=y; i<gw->ggc->clip.y+gw->ggc->clip.height; i+=base->height ) {
-	    if ( i+base->height<gw->ggc->clip.y )
-	continue;
-	    for ( j=x; j<gw->ggc->clip.x+gw->ggc->clip.width; j+=base->width ) {
-		if ( j+base->width<gw->ggc->clip.x )
-	    continue;
-		XCopyArea(display,((GXWindow) pixmap)->w,w,gc,
-			0,0,  base->width, base->height,
-			j,i);
-	    }
-	}
-	GDrawPopClip(_w,&old);
-	GDrawDestroyWindow(pixmap);
-    } else {
-	GWindow pixmap, maskmap;
-	GXWindow gw = (GXWindow) _w;
-	GXDisplay *gdisp = gw->display;
-	Display *display=gdisp->display;
-	Window w = gw->w;
-	GC gc = gdisp->gcstate[gw->ggc->bitmap_col].gc;
-	GRect full, old;
-	int i,j;
-
-	full.x = full.y = 0; full.width = base->width; full.height = base->height;
-	pixmap = GDrawCreatePixmap((GDisplay *) gdisp,base->width,base->height);
-	maskmap = GDrawCreatePixmap((GDisplay *) gdisp,base->width,base->height);
-	gximage_to_ximage(gw, image, &full);
-	GDrawDestroyWindow(maskmap);
-#if FAST_BITS
-	XSetForeground(display,gc, ~((-1)<<gdisp->pixel_size) );
-	XSetBackground(display,gc, 0 );
-#endif
-	XSetFunction(display,gc,GXcopy);
-	XPutImage(display,((GXWindow) maskmap)->w,gc,gdisp->gg.mask,0,0,
-		x,y, src->width, src->height );
-	XPutImage(display,((GXWindow) pixmap)->w,gc,gdisp->gg.img,0,0,
-		x,y, src->width, src->height );
-	GDrawPushClip(_w,src,&old);
-	_GXDraw_SetClipFunc(gdisp,gw->ggc);
-	for ( i=y; i<gw->ggc->clip.y+gw->ggc->clip.height; i+=base->height ) {
-	    if ( i+base->height<gw->ggc->clip.y )
-	continue;
-	    for ( j=x; j<gw->ggc->clip.x+gw->ggc->clip.width; j+=base->width ) {
-		if ( j+base->width<gw->ggc->clip.x )
-	    continue;
-		XSetFunction(display,gc,GXand);
-		XCopyArea(display,((GXWindow) maskmap)->w,w,gc,
-			0,0,  base->width, base->height,
-			j,i);
-		XSetFunction(display,gc,GXor);
-		XCopyArea(display,((GXWindow) pixmap)->w,w,gc,
-			0,0,  base->width, base->height,
-			j,i);
-	    }
-	}
-	GDrawPopClip(_w,&old);
-	GDrawDestroyWindow(pixmap);
-	GDrawDestroyWindow(maskmap);
-	XSetFunction(display,gc,GXcopy);
-	gdisp->gcstate[gw->ggc->bitmap_col].fore_col = COLOR_UNKNOWN;
-	gdisp->gcstate[gw->ggc->bitmap_col].func = df_copy;
-    }
 }
 
 /* When drawing an anti-aliased glyph, I've been pretending that it's an image*/
@@ -2316,9 +2224,13 @@ static GImage *xi1_to_gi1(GXDisplay *gdisp,XImage *xi) {
     struct _GImage *base;
 
     gi = calloc(1,sizeof(GImage));
-    base = malloc(sizeof(struct _GImage));
-    if ( gi==NULL || base==NULL )
+    if ( gi==NULL )
 return( NULL );
+    base = malloc(sizeof(struct _GImage));
+    if ( base==NULL ) {
+        free(gi);
+return( NULL );
+    }
     gi->u.image = base;
     base->image_type = it_mono;
     base->width = xi->width;
@@ -2354,10 +2266,19 @@ static GImage *xi8_to_gi8(GXDisplay *gdisp,XImage *xi) {
     XColor cols[256];
 
     gi = calloc(1,sizeof(GImage));
-    base = malloc(sizeof(struct _GImage));
-    clut = malloc(sizeof(GClut));
-    if ( gi==NULL || base==NULL )
+    if ( gi==NULL )
 return( NULL );
+    base = malloc(sizeof(struct _GImage));
+    if ( base ==NULL ) {
+        free(gi);
+return( NULL );
+    }
+    clut = malloc(sizeof(GClut));
+    if ( clut ==NULL ) {
+        free(base);
+        free(gi);
+return( NULL );
+    }
     gi->u.image = base;
     base->image_type = it_index;
     base->width = xi->width;
@@ -2525,4 +2446,5 @@ return( gi );
 }
 #else	/* NO X */
 int gimagexdraw_a_file_must_define_something=3;
+
 #endif

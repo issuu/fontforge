@@ -25,10 +25,15 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <fontforge-config.h>
+
+#include "cvundoes.h"
 #include "fontforgeui.h"
-#include <utype.h>
-#include <ustring.h>
 #include "nonlineartrans.h"
+#include "splineutil.h"
+#include "ustring.h"
+#include "utype.h"
 
 struct nldlg {
     GWindow gw;
@@ -56,7 +61,7 @@ void NonLinearDlg(FontView *fv,CharView *cv) {
     GWindowAttrs wattrs;
     GGadgetCreateData gcd[8], boxes[4], *hvarray[3][3], *barray[9], *varray[3][2];
     GTextInfo label[8];
-    struct context c;
+    struct expr_context c;
     char *expstr;
 
     memset(&d,'\0',sizeof(d));
@@ -84,8 +89,8 @@ void NonLinearDlg(FontView *fv,CharView *cv) {
     label[0].text_is_1byte = true;
     gcd[0].gd.label = &label[0];
     gcd[0].gd.pos.x = 10; gcd[0].gd.pos.y = 8;
-    gcd[0].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[0].gd.popup_msg = (unichar_t *) _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
+    gcd[0].gd.flags = gg_visible | gg_enabled;
+    gcd[0].gd.popup_msg = _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
     gcd[0].creator = GLabelCreate;
     hvarray[0][0] = &gcd[0];
 
@@ -97,8 +102,8 @@ void NonLinearDlg(FontView *fv,CharView *cv) {
     }
     gcd[1].gd.label = &label[1];
     gcd[1].gd.pos.x = 55; gcd[1].gd.pos.y = 5; gcd[1].gd.pos.width = 135;
-    gcd[1].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[1].gd.popup_msg = (unichar_t *) _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
+    gcd[1].gd.flags = gg_visible | gg_enabled;
+    gcd[1].gd.popup_msg = _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
     gcd[1].creator = GTextFieldCreate;
     hvarray[0][1] = &gcd[1]; hvarray[0][2] = NULL;
 
@@ -107,8 +112,8 @@ void NonLinearDlg(FontView *fv,CharView *cv) {
     label[2].text_is_1byte = true;
     gcd[2].gd.label = &label[2];
     gcd[2].gd.pos.x = 10; gcd[2].gd.pos.y = gcd[0].gd.pos.y+26;
-    gcd[2].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[2].gd.popup_msg = (unichar_t *) _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
+    gcd[2].gd.flags = gg_visible | gg_enabled;
+    gcd[2].gd.popup_msg = _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
     gcd[2].creator = GLabelCreate;
     hvarray[1][0] = &gcd[2];
 
@@ -121,8 +126,8 @@ void NonLinearDlg(FontView *fv,CharView *cv) {
     gcd[3].gd.label = &label[3];
     gcd[3].gd.pos.x = gcd[1].gd.pos.x; gcd[3].gd.pos.y = gcd[1].gd.pos.y+26;
     gcd[3].gd.pos.width = gcd[1].gd.pos.width;
-    gcd[3].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[3].gd.popup_msg = (unichar_t *) _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
+    gcd[3].gd.flags = gg_visible | gg_enabled;
+    gcd[3].gd.popup_msg = _("These expressions may contain the operators +,-,*,/,%,^ (which means raise to the power of here), and ?: It may also contain a few standard functions. Basic terms are real numbers, x and y.\nExamples:\n x^3+2.5*x^2+5\n (x-300)*(y-200)/100\n y+sin(100*x)");
     gcd[3].creator = GTextFieldCreate;
     hvarray[1][1] = &gcd[3]; hvarray[1][2] = NULL; hvarray[2][0] = NULL;
 
@@ -253,8 +258,8 @@ extern char *coord_sep;
     y = GetQuietReal(d->gw,CID_YValue,&err);
     /*z = GetQuietReal(d->gw,CID_ZValue,&err);*/
     dv = GetQuietReal(d->gw,CID_DValue,&err);
-    tilt = GetQuietReal(d->gw,CID_Tilt,&err)*3.1415926535897932/180;
-    dir = GetQuietReal(d->gw,CID_GazeDirection,&err)*3.1415926535897932/180;
+    tilt = GetQuietReal(d->gw,CID_Tilt,&err)*FF_PI/180;
+    dir = GetQuietReal(d->gw,CID_GazeDirection,&err)*FF_PI/180;
     if ( err )
 return;
     if ( GGadgetGetFirstListSelectedItem( GWidgetGetControl(d->gw,CID_XType))!=3 )
@@ -284,7 +289,7 @@ return( true );
 
 int PointOfViewDlg(struct pov_data *pov, SplineFont *sf, int flags) {
     static struct pov_data def = { or_center, or_value, 0, 0, .1,
-	    0, 3.1415926535897932/16, .2, 0 };
+	    0, FF_PI/16, .2, 0 };
     double emsize = (sf->ascent + sf->descent);
     struct nldlg d;
     GRect pos;
@@ -459,7 +464,7 @@ int PointOfViewDlg(struct pov_data *pov, SplineFont *sf, int flags) {
     gcd[k++].creator = GLabelCreate;
     varray[l][0] = &gcd[k-1];
 
-    sprintf( tval, "%g", rint(pov->tilt*180/3.1415926535897932));
+    sprintf( tval, "%g", rint(pov->tilt*180/FF_PI));
     label[k].text = (unichar_t *) tval;
     label[k].text_is_1byte = true;
     gcd[k].gd.label = &label[k];
@@ -491,7 +496,7 @@ int PointOfViewDlg(struct pov_data *pov, SplineFont *sf, int flags) {
     gcd[k++].creator = GLabelCreate;
     varray[l][0] = &gcd[k-1];
 
-    sprintf( dirval, "%g", rint(pov->direction*180/3.1415926535897932));
+    sprintf( dirval, "%g", rint(pov->direction*180/FF_PI));
     label[k].text = (unichar_t *) dirval;
     label[k].text_is_1byte = true;
     gcd[k].gd.label = &label[k];
@@ -519,8 +524,8 @@ int PointOfViewDlg(struct pov_data *pov, SplineFont *sf, int flags) {
     label[k].text_is_1byte = true;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.pos.x = 10; gcd[k].gd.pos.y = gcd[k-1].gd.pos.y+18;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("This is the approximate location of the vanishing point.\nIt does not include the offset induced by \"Center of selection\"\nnor \"Last Press\".");
+    gcd[k].gd.flags = gg_visible | gg_enabled;
+    gcd[k].gd.popup_msg = _("This is the approximate location of the vanishing point.\nIt does not include the offset induced by \"Center of selection\"\nnor \"Last Press\".");
     gcd[k++].creator = GLabelCreate;
     varray[l][0] = &gcd[k-1];
 
@@ -528,8 +533,8 @@ int PointOfViewDlg(struct pov_data *pov, SplineFont *sf, int flags) {
     label[k].text_is_1byte = true;
     gcd[k].gd.label = &label[k];
     gcd[k].gd.pos.x = 160; gcd[k].gd.pos.y = gcd[k-1].gd.pos.y;
-    gcd[k].gd.flags = gg_visible | gg_enabled | gg_utf8_popup;
-    gcd[k].gd.popup_msg = (unichar_t *) _("This is the approximate location of the vanishing point.\nIt does not include the offset induced by \"Center of selection\"\nnor \"Last Press\".");
+    gcd[k].gd.flags = gg_visible | gg_enabled;
+    gcd[k].gd.popup_msg = _("This is the approximate location of the vanishing point.\nIt does not include the offset induced by \"Center of selection\"\nnor \"Last Press\".");
     gcd[k].gd.cid = CID_Vanish;
     gcd[k++].creator = GLabelCreate;
     varray[l][1] = &gcd[k-1]; varray[l++][2] = NULL;
@@ -590,8 +595,8 @@ return( -1 );
     continue;
 	    }
 	    pov->x = x; pov->y = y; pov->z = z; pov->d = dv;
-	    pov->tilt = tilt*3.1415926535897932/180;
-	    pov->direction = dir*3.1415926535897932/180;
+	    pov->tilt = tilt*FF_PI/180;
+	    pov->direction = dir*FF_PI/180;
 	    pov->xorigin = GGadgetGetFirstListSelectedItem( GWidgetGetControl(d.gw,CID_XType));
 	    pov->yorigin = GGadgetGetFirstListSelectedItem( GWidgetGetControl(d.gw,CID_YType));
 	}

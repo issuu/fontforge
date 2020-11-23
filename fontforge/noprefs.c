@@ -24,21 +24,30 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "fontforge.h"
-#include "groups.h"
-#include "plugins.h"
-#include <charset.h>
-#include <gfile.h>
-#include <ustring.h>
 
-#include <sys/types.h>
+#include <fontforge-config.h>
+
+#include "autotrace.h"
+#include "charset.h"
+#include "encoding.h"
+#include "ffglib.h"
+#include "fontforge.h"
+#include "gfile.h"
+#include "groups.h"
+#include "macenc.h"
+#include "namelist.h"
+#include "othersubrs.h"
+#include "sfd.h"
+#include "splineutil.h"
+#include "ttf.h"
+#include "ustring.h"
+
 #include <dirent.h>
 #include <locale.h>
-#include <time.h>
-#include <sys/time.h>
 #include <stdlib.h>
-
-#include "ttf.h"
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
 
 #if HAVE_LANGINFO_H
 # include <langinfo.h>
@@ -47,8 +56,6 @@
 #if defined(__MINGW32__)
 #include <windows.h>
 #endif
-
-#include <glib.h>
 
 static char *othersubrsfile = NULL;
 
@@ -138,6 +145,8 @@ static int  gridfit_x_sameas_y=true;		/* in cvgridfit.c */
 static int default_font_filter_index=0;
 static unichar_t *script_menu_names[SCRIPT_MENU_MAX];
 static char *script_filenames[SCRIPT_MENU_MAX];
+/* defined in fontforgeui.h */
+#define RECENT_MAX 10
 static char *RecentFiles[RECENT_MAX];
 static int ItalicConstrained = true;
 extern int clear_tt_instructions_when_needed;	/* cvundoes.c */
@@ -145,6 +154,7 @@ static int cv_width;			/* in charview.c */
 static int cv_height;			/* in charview.c */
 static int mv_width;				/* in metricsview.c */
 static int mv_height;				/* in metricsview.c */
+static int fvmv_selectmax;			/* in metricsview.c */
 static int bv_width;				/* in bitmapview.c */
 static int bv_height;				/* in bitmapview.c */
 static int mvshowgrid;				/* in metricsview.c */
@@ -242,6 +252,7 @@ extras[] = {
     { N_("SplashScreen"), pr_bool, &splash, NULL, NULL, 'S', NULL, 0, N_("Show splash screen on start-up") },
     { N_("GlyphAutoGoto"), pr_bool, &cv_auto_goto, NULL, NULL, '\0', NULL, 0, N_("Typing a normal character in the glyph view window changes the window to look at that character") },
     { N_("OpenCharsInNewWindow"), pr_bool, &OpenCharsInNewWindow, NULL, NULL, '\0', NULL, 0, N_("When double clicking on a character in the font view\nopen that character in a new window, otherwise\nreuse an existing one.") },
+    { N_("FontViewMetricsViewSelectMax"), pr_int, &fvmv_selectmax, NULL, NULL, '\0', NULL, 0, N_("When characters are selected in the FontView, how many should be put into the MetricsView if you open one? Negative values mean there's no limit, which should be used sparingly.") },
     { N_("ArrowMoveSize"), pr_real, &arrowAmount, NULL, NULL, '\0', NULL, 0, N_("The number of em-units by which an arrow key will move a selected point") },
     { N_("ArrowAccelFactor"), pr_real, &arrowAccelFactor, NULL, NULL, '\0', NULL, 0, N_("Holding down the Shift key will speed up arrow key motion by this factor") },
     { N_("SnapDistance"), pr_real, &snapdistance, NULL, NULL, '\0', NULL, 0, N_("When the mouse pointer is within this many pixels\nof one of the various interesting features (baseline,\nwidth, grid splines, etc.) the pointer will snap\nto that feature.") },
@@ -440,45 +451,16 @@ return( prefs );
 }
 
 static char *NOUI_getFontForgeShareDir(void) {
-#if defined(__MINGW32__)
-    #ifndef MAX_PATH
-    #define MAX_PATH 4096
-    #endif
-    
-    static char* sharedir = NULL;
-    if(!sharedir){
-	char path[MAX_PATH+32];
-	char* c = path;
-	char* tail = 0;
-	unsigned int  len = GetModuleFileNameA(NULL, path, MAX_PATH);
-	path[len] = '\0';
-	for(; *c; *c++){
-	    if(*c == '\\'){
-		tail=c;
-		*c = '/';
-	    }
-	}
-	if(!tail) tail=c;
-	strcpy(tail, "/share/fontforge");
-	sharedir = copy(path);
-    }
-    return sharedir;
-#elif defined(SHAREDIR)
-return( SHAREDIR "/fontforge" );
-#elif defined(PREFIX)
-return( PREFIX "/share/fontforge" );
-#else
-return( NULL );
-#endif
+	return getShareDir();
 }
 
-#  include <charset.h>		/* we still need the charsets & encoding to set local_encoding */
 static int encmatch(const char *enc,int subok) {
     static struct { char *name; int enc; } encs[] = {
 	{ "US-ASCII", e_usascii },
 	{ "ASCII", e_usascii },
 	{ "ISO646-NO", e_iso646_no },
 	{ "ISO646-SE", e_iso646_se },
+	{ "LATIN10", e_iso8859_16 },
 	{ "LATIN1", e_iso8859_1 },
 	{ "ISO-8859-1", e_iso8859_1 },
 	{ "ISO-8859-2", e_iso8859_2 },
@@ -494,6 +476,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO-8859-13", e_iso8859_13 },
 	{ "ISO-8859-14", e_iso8859_14 },
 	{ "ISO-8859-15", e_iso8859_15 },
+	{ "ISO-8859-16", e_iso8859_16 },
 	{ "ISO_8859-1", e_iso8859_1 },
 	{ "ISO_8859-2", e_iso8859_2 },
 	{ "ISO_8859-3", e_iso8859_3 },
@@ -508,6 +491,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO_8859-13", e_iso8859_13 },
 	{ "ISO_8859-14", e_iso8859_14 },
 	{ "ISO_8859-15", e_iso8859_15 },
+	{ "ISO_8859-16", e_iso8859_16 },
 	{ "ISO8859-1", e_iso8859_1 },
 	{ "ISO8859-2", e_iso8859_2 },
 	{ "ISO8859-3", e_iso8859_3 },
@@ -522,6 +506,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO8859-13", e_iso8859_13 },
 	{ "ISO8859-14", e_iso8859_14 },
 	{ "ISO8859-15", e_iso8859_15 },
+	{ "ISO8859-16", e_iso8859_16 },
 	{ "ISO88591", e_iso8859_1 },
 	{ "ISO88592", e_iso8859_2 },
 	{ "ISO88593", e_iso8859_3 },
@@ -536,6 +521,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "ISO885913", e_iso8859_13 },
 	{ "ISO885914", e_iso8859_14 },
 	{ "ISO885915", e_iso8859_15 },
+	{ "ISO885916", e_iso8859_16 },
 	{ "8859_1", e_iso8859_1 },
 	{ "8859_2", e_iso8859_2 },
 	{ "8859_3", e_iso8859_3 },
@@ -550,6 +536,7 @@ static int encmatch(const char *enc,int subok) {
 	{ "8859_13", e_iso8859_13 },
 	{ "8859_14", e_iso8859_14 },
 	{ "8859_15", e_iso8859_15 },
+	{ "8859_16", e_iso8859_16 },
 	{ "KOI8-R", e_koi8_r },
 	{ "KOI8R", e_koi8_r },
 	{ "WINDOWS-1252", e_win },
@@ -579,7 +566,7 @@ static int encmatch(const char *enc,int subok) {
     };
     int i;
     char buffer[80];
-#if HAVE_ICONV
+#if HAVE_ICONV_H
     static char *last_complaint;
 
     iconv_t test;
@@ -602,7 +589,7 @@ return( encs[i].enc );
 	    if ( strstrmatch(enc,encs[i].name)!=NULL )
 return( encs[i].enc );
 
-#if HAVE_ICONV
+#if HAVE_ICONV_H
 	/* I only try to use iconv if the encoding doesn't match one I support*/
 	/*  loading iconv unicode data takes a while */
 	test = iconv_open(enc,FindUnicharName());
@@ -634,7 +621,7 @@ static int DefaultEncoding(void) {
     const char *loc;
     int enc;
 
-#if HAVE_LANGINFO_H
+#if HAVE_NL_LANGINFO
     loc = nl_langinfo(CODESET);
     enc = encmatch(loc,false);
     if ( enc!=e_unknown )
@@ -722,7 +709,6 @@ static void NOUI_LoadPrefs(void) {
     char *pt;
     struct prefs_list *pl;
 
-    LoadPluginDir(NULL);
     LoadPfaEditEncodings();
     LoadGroupList();
 

@@ -25,15 +25,17 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fontforge-config.h>
+
 #include "gdraw.h"
 #include "gfile.h"
 #include "hotkeys.h"
-#include <locale.h>
-#include <string.h>
-#include <ustring.h>
-#include <errno.h>
-#include <unistd.h>
 #include "intl.h"
+#include "ustring.h"
+
+#include <errno.h>
+#include <locale.h>
+#include <unistd.h>
 
 #ifdef __MINGW32__
 #define fsync _commit
@@ -128,8 +130,6 @@ static Hotkey* hotkeyFindByStateAndKeysym( char* windowType, uint16 state, uint1
 
 
 struct dlistnodeExternal* hotkeyFindAllByEvent( GWindow w, GEvent *event ) {
-    if( event->u.chr.autorepeat )
-	return 0;
     char* windowType = GDrawGetWindowTypeName( w );
     return hotkeyFindAllByStateAndKeysym( windowType,
 					  event->u.chr.state,
@@ -138,10 +138,6 @@ struct dlistnodeExternal* hotkeyFindAllByEvent( GWindow w, GEvent *event ) {
 
 
 Hotkey* hotkeyFindByEvent( GWindow w, GEvent *event ) {
-
-    if( event->u.chr.autorepeat )
-	return 0;
-
     char* windowType = GDrawGetWindowTypeName( w );
     return hotkeyFindByStateAndKeysym( windowType, event->u.chr.state, event->u.chr.keysym );
 }
@@ -386,7 +382,7 @@ Hotkey* isImmediateKey( GWindow w, char* path, GEvent *event )
     Hotkey* hk = hotkeyFindByAction( line );
     if( !hk )
 	return 0;
-    if( hk && !hk->action )
+    if( !hk->action )
 	return 0;
     
     if( event->u.chr.keysym == hk->keysym )
@@ -422,9 +418,11 @@ Hotkey* hotkeyFindByMenuPath( GWindow w, char* path ) {
 char* hotkeyTextToMacModifiers( char* keydesc )
 {
     keydesc = copy( keydesc );
+    keydesc = str_replace_all( keydesc, "Ctrl", "⌘", 1 );
     keydesc = str_replace_all( keydesc, "Ctl", "⌘", 1 );
     keydesc = str_replace_all( keydesc, "Command", "⌘", 1 );
     keydesc = str_replace_all( keydesc, "Cmd", "⌘", 1 );
+    keydesc = str_replace_all( keydesc, "Shift", "⇧", 1 );
     keydesc = str_replace_all( keydesc, "Shft", "⇧", 1 );
     keydesc = str_replace_all( keydesc, "Alt", "⎇", 1 );
     keydesc = str_replace_all( keydesc, "+", "", 1 );

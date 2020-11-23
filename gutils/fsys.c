@@ -841,6 +841,11 @@ char *getShareDir(void) {
 	return( sharedir );
 
     set = true;
+    if (!program_dir) {
+	sharedir = ".";
+	return( sharedir );
+    }
+
 
     //Assume share folder is one directory up
     pt = strrchr(program_dir, '/');
